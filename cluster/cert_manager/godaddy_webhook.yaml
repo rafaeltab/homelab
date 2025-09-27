@@ -13,9 +13,7 @@ spec:
         kind: HelmRepository
         name: godaddy-webhook
         namespace: flux-system
-    values:
-      groupName: rafaeltab.com
   install:
     createNamespace: true
   values:
-    installCRDs: true
+    groupName: rafaeltab.com
