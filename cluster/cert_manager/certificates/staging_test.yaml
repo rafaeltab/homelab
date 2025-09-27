@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-staging-network-rafaeltab-com
+spec:
+  secretName: wildcard-staging-network-rafaeltab-com-tls
+  renewBefore: 240h
+  dnsNames:
+  - '*.staging.network.rafaeltab.com'
+  issuerRef:
+    name: letsencrypt-staging
+    kind: ClusterIssuer
