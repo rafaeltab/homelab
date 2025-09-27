@@ -20,7 +20,9 @@
             just
             zsh
             gum
-            flux
+            fluxcd
+            gnupg
+            sops
           ];
           env = {
               SHELL="${pkgs.zsh}/bin/zsh";
