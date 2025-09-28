@@ -23,6 +23,8 @@ spec:
   values:
     tenant:
       name: minio
+      certificate:
+        requestAutoCert: false
       pools:
         - name: pool-0
           servers: 1
