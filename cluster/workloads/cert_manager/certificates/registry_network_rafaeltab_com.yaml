@@ -1,13 +1,13 @@
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: wildcard-network-rafaeltab-com
-  namespace: cert-manager
+  name: registry-network-rafaeltab-com
+  namespace: registry
 spec:
-  secretName: wildcard-network-rafaeltab-com-tls
+  secretName: registry-network-rafaeltab-com-tls
   renewBefore: 240h
   dnsNames:
-    - "*.network.rafaeltab.com"
+    - "registry.network.rafaeltab.com"
   issuerRef:
     name: letsencrypt-prod
     kind: ClusterIssuer

@@ -38,10 +38,10 @@ spec:
       path: /
       hosts:
         - registry.network.rafaeltab.com
-      tls: 
+      tls:
         - hosts:
-          - "*.network.rafaeltab.com"
-          secretName: wildcard-network-rafaeltab-com-tls
+            - "registry.network.rafaeltab.com"
+          secretName: registry-network-rafaeltab-com-tls
     persistence:
       enabled: true
       accessModes:

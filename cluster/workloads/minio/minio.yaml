@@ -52,8 +52,8 @@ spec:
         - minio.network.rafaeltab.com
       tls:
         - hosts:
-            - "*.network.rafaeltab.com"
-          secretName: wildcard-network-rafaeltab-com-tls
+            - "minio.network.rafaeltab.com"
+          secretName: minio-network-rafaeltab-com-tls
 
     persistence:
       enabled: true
