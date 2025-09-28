@@ -30,8 +30,18 @@ spec:
       labels: {}
 
     ingress:
-      enabled: false
-
+      enabled: true
+      className: "traefik"
+      annotations:
+        traefik.ingress.kubernetes.io/router.entrypoints: web
+        traefik.ingress.kubernetes.io/router.tls: "true"
+      path: /
+      hosts:
+        - registry.network.rafaeltab.com
+      tls:
+        - hosts:
+            - "registry.network.rafaeltab.com"
+          secretName: registry-network-rafaeltab-com-tls
     persistence:
       enabled: true
       accessModes:

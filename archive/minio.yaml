@@ -42,7 +42,18 @@ spec:
       consolePort: 9001
 
     ingress:
-      enabled: false
+      enabled: true
+      className: "traefik"
+      annotations:
+        traefik.ingress.kubernetes.io/router.entrypoints: web
+        traefik.ingress.kubernetes.io/router.tls: "true"
+      path: /
+      hosts:
+        - minio.network.rafaeltab.com
+      tls:
+        - hosts:
+            - "minio.network.rafaeltab.com"
+          secretName: minio-network-rafaeltab-com-tls
 
     persistence:
       enabled: true
