@@ -7,10 +7,10 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - minio.network.rafaeltab.com
+        - "minio.network.rafaeltab.com"
       secretName: minio_network_rafaeltab_com_tls
   rules:
-    - host: minio.network.rafaeltab.com
+    - host: "minio.network.rafaeltab.com"
       http:
         paths:
           - path: /
