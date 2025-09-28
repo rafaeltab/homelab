@@ -25,7 +25,7 @@ spec:
       name: minio
       certificate:
         requestAutoCert: false
-      configuration:
+      configSecret:
         name: minio-creds
       pools:
         - name: pool-0
