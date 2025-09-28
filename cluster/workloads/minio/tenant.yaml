@@ -1,26 +1,26 @@
-apiVersion: minio.min.io/v2
-kind: Tenant
-metadata:
-  name: minio-tenant
-  namespace: minio
-spec:
-  requestAutoCert: false # set true if you want operator-managed TLS with cert-manager
-  credsSecret:
-    name: minio-creds
-  pools:
-    - name: pool-0
-      servers: 1
-      volumesPerServer: 1
-      volumeClaimTemplate:
-        metadata:
-          name: data
-        spec:
-          accessModes:
-            - ReadWriteOnce
-          storageClassName: zfs-local
-          resources:
-            requests:
-              storage: 10Gb
-  exposeServices:
-    console: true
-    minio: true
+# apiVersion: minio.min.io/v2
+# kind: Tenant
+# metadata:
+#   name: minio-tenant
+#   namespace: minio
+# spec:
+#   requestAutoCert: false # set true if you want operator-managed TLS with cert-manager
+#   credsSecret:
+#     name: minio-creds
+#   pools:
+#     - name: pool-0
+#       servers: 1
+#       volumesPerServer: 1
+#       volumeClaimTemplate:
+#         metadata:
+#           name: data
+#         spec:
+#           accessModes:
+#             - ReadWriteOnce
+#           storageClassName: zfs-local
+#           resources:
+#             requests:
+#               storage: 10Gb
+#   exposeServices:
+#     console: true
+#     minio: true

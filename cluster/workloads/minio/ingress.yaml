@@ -1,16 +1,16 @@
-apiVersion: traefik.containo.us/v1alpha1
-kind: IngressRoute
-metadata:
-  name: minio-console
-  namespace: minio
-spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`minio.network.rafaeltab.com`)
-      kind: Rule
-      services:
-        - name: minio-tenant-console
-          port: 9001
-  tls:
-    secretName: minio_network_rafaeltab_com_tls
+# apiVersion: traefik.containo.us/v1alpha1
+# kind: IngressRoute
+# metadata:
+#   name: minio-console
+#   namespace: minio
+# spec:
+#   entryPoints:
+#     - websecure
+#   routes:
+#     - match: Host(`minio.network.rafaeltab.com`)
+#       kind: Rule
+#       services:
+#         - name: minio-tenant-console
+#           port: 9001
+#   tls:
+#     secretName: minio_network_rafaeltab_com_tls
