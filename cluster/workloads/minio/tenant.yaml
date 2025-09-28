@@ -20,7 +20,7 @@ spec:
           storageClassName: zfs-local
           resources:
             requests:
-              storage: 10Gb
+              storage: 10G
   exposeServices:
     console: true
     minio: true
