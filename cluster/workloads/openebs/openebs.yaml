@@ -20,7 +20,7 @@ spec:
       local:
         lvm:
           enabled: false
-        zfs: 
+        zfs:
           enabled: true
         rawfile:
           enabled: false
@@ -28,4 +28,6 @@ spec:
         mayastor:
           enabled: false
     loki:
+      enabled: false
+    alloy:
       enabled: false
