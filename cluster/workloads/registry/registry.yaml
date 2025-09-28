@@ -40,7 +40,7 @@ spec:
         - registry.network.rafaeltab.com
       tls: 
         - hosts:
-          - *.network.rafaeltab.com
+          - "*.network.rafaeltab.com"
           secretName: wildcard-network-rafaeltab-com-tls
     persistence:
       enabled: true
