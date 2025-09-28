@@ -1,0 +1,113 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: registry
+  namespace: registry
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: docker-registry
+      version: v3.0.0
+      sourceRef:
+        kind: HelmRepository
+        name: twuni
+        namespace: flux-system
+  install:
+    createNamespace: true
+  values:
+    image:
+      repository: registry
+      tag: "2.8.3"
+      pullPolicy: IfNotPresent
+
+    replicaCount: 1
+
+    service:
+      type: ClusterIP
+      port: 5000
+      annotations: {}
+      labels: {}
+
+    ingress:
+      enabled: true
+      className: "traefik"
+      annotations:
+        traefik.ingress.kubernetes.io/router.entrypoints: web
+        traefik.ingress.kubernetes.io/router.tls: "true"
+      path: /
+      hosts:
+        - registry.network.rafaeltab.com
+      tls: 
+        - hosts:
+          - *.network.rafaeltab.com
+          secretName: wildcard-network-rafaeltab-com-tls
+    persistence:
+      enabled: true
+      accessModes:
+        - ReadWriteOnce
+      size: 50Gi
+      storageClass: zfs-local
+      annotations: {}
+      existingClaim: ""
+      mountPath: /var/lib/registry
+
+    registry:
+      storage:
+        delete:
+          enabled: true
+      http:
+        addr: :5000
+        headers:
+          X-Content-Type-Options: [nosniff]
+      health:
+        storagedriver:
+          enabled: true
+          interval: 10s
+          threshold: 3
+
+    # Optional basic auth (still works over HTTP; be aware creds are sent in cleartext)
+    auth:
+      enabled: false
+      existingSecret: ""
+      mountPath: /auth
+      realm: "basic-realm"
+
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+    podSecurityContext:
+      fsGroup: 1000
+      runAsUser: 1000
+      runAsGroup: 1000
+
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+
+    livenessProbe:
+      httpGet:
+        path: /v2/
+        port: 5000
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      failureThreshold: 6
+
+    readinessProbe:
+      httpGet:
+        path: /v2/
+        port: 5000
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      failureThreshold: 6
+
+    extraEnv: []
+    extraVolumes: []
+    extraVolumeMounts: []
