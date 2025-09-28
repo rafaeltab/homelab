@@ -8,7 +8,7 @@ spec:
   tls:
     - hosts:
         - "minio.network.rafaeltab.com"
-      secretName: minio_network_rafaeltab_com_tls
+      secretName: minio-network-rafaeltab-com-tls
   rules:
     - host: "minio.network.rafaeltab.com"
       http:
