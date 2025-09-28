@@ -17,6 +17,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: minio-tenant-console
+                name: console
                 port:
                   number: 9001
