@@ -42,7 +42,7 @@ spec:
       consolePort: 9001
 
     ingress:
-      enabled: false
+      enabled: true
       className: "traefik"
       annotations:
         traefik.ingress.kubernetes.io/router.entrypoints: web
