@@ -25,11 +25,11 @@ spec:
       name: minio
       certificate:
         requestAutoCert: false
+      users:
+        - minio-creds
       pools:
         - name: pool-0
           servers: 1
-          users:
-            - minio-creds
           volumesPerServer: 1
     ingress:
       console:
