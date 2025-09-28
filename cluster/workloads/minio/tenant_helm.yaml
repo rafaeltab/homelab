@@ -25,8 +25,8 @@ spec:
       name: minio
       certificate:
         requestAutoCert: false
-      users:
-        - name: minio-creds
+      configuration:
+        name: minio-creds
       pools:
         - name: pool-0
           servers: 1
