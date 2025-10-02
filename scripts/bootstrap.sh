@@ -10,7 +10,7 @@ flux bootstrap github \
     --owner=$GITHUB_USER \
     --repository=homelab \
     --branch=main \
-    --path=cluster \
+    --path=cluster/flux \
     --personal \
     --components source-controller,kustomize-controller,helm-controller
 
