@@ -1,46 +1,44 @@
-apiVersion: helm.toolkit.fluxcd.io/v2
-kind: HelmRelease
-metadata:
-  name: minio-tenant
-  namespace: minio
-spec:
-  interval: 5m
-  chart:
-    spec:
-      chart: tenant
-      version: "7.1.1"
-      sourceRef:
-        kind: HelmRepository
-        name: minio-operator
-        namespace: flux-system
-      interval: 1h
-  install:
-    remediation:
-      retries: 3
-  upgrade:
-    remediation:
-      retries: 3
-  values:
-    tenant:
-      name: minio
-      certificate:
-        requestAutoCert: false
-      configuration:
-        name: minio-creds
-      configSecret:
-        name: minio-creds
-        existingSecret: true
-      pools:
-        - name: pool-0
-          servers: 1
-          volumesPerServer: 1
-    ingress:
-      console:
-        enabled: true
-        ingressClassName: "traefik"
-        host: minio.network.rafaeltab.com
-        path: /
-        tls:
-          - hosts:
-              - "minio.network.rafaeltab.com"
-            secretName: minio-network-rafaeltab-com-tls
+# apiVersion: helm.toolkit.fluxcd.io/v2
+# kind: HelmRelease
+# metadata:
+#   name: minio-tenant
+#   namespace: minio
+# spec:
+#   interval: 5m
+#   chart:
+#     spec:
+#       chart: tenant
+#       version: "7.1.1"
+#       sourceRef:
+#         kind: HelmRepository
+#         name: minio-operator
+#         namespace: flux-system
+#       interval: 1h
+#   install:
+#     remediation:
+#       retries: 3
+#   upgrade:
+#     remediation:
+#       retries: 3
+#   values:
+#     tenant:
+#       name: minio
+#       certificate:
+#         requestAutoCert: false
+#       configSecret:
+#         name: minio-creds
+#         existingSecret: true
+#       pools:
+#         - name: pool-0
+#           servers: 1
+#           volumesPerServer: 1
+#     ingress:
+#       console:
+#         enabled: true
+#         ingressClassName: "traefik"
+#         host: minio.network.rafaeltab.com
+#         path: /
+#         tls:
+#           - hosts:
+#               - "minio.network.rafaeltab.com"
+#             secretName: minio-network-rafaeltab-com-tls
