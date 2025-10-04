@@ -13,6 +13,7 @@
           packages = with pkgs; [
             git
             jq
+            yq
             curl
             wget
             ripgrep
