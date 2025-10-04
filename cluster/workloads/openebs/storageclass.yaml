@@ -12,5 +12,5 @@ parameters:
   recordsize: "128k"
   compression: "zstd"
 allowVolumeExpansion: true
-reclaimPolicy: Delete
+reclaimPolicy: Retain
 volumeBindingMode: WaitForFirstConsumer
