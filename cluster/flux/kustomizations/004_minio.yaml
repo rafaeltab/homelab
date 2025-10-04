@@ -16,3 +16,4 @@ spec:
     - name: namespaces
     - name: helm-repositories
     - name: cert-manager
+    - name: certificates
