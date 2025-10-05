@@ -66,7 +66,6 @@ spec:
             endpoint: minio.minio.svc.cluster.local:80
             bucket: tempo-blocks
             insecure: true
-            s3forcepathstyle: true
             # Map your secret keys to envs used here
             access_key: ${AWS_ACCESS_KEY_ID:-${access_key:-}}
             secret_key: ${AWS_SECRET_ACCESS_KEY:-${secret_key:-}}
