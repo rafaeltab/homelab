@@ -1,150 +1,150 @@
-# apiVersion: helm.toolkit.fluxcd.io/v2
-# kind: HelmRelease
-# metadata:
-#   name: mimir
-#   namespace: observability
-# spec:
-#   interval: 5m
-#   chart:
-#     spec:
-#       chart: mimir-distributed
-#       version: "5.8.0"
-#       sourceRef:
-#         kind: HelmRepository
-#         name: grafana
-#         namespace: flux-system
-#       interval: 1h
-#   install:
-#     remediation:
-#       retries: 3
-#   upgrade:
-#     remediation:
-#       retries: 3
-#   values:
-#     # Inject S3 credentials from your existing Secret as env vars
-#     # access_key -> ${access_key}, secret_key -> ${secret_key}
-#     global:
-#       extraEnvFrom:
-#         - secretRef:
-#             name: mimir-minio-user
-#
-#     # Optional: bump this string to force pod restarts if credentials change
-#     podAnnotations:
-#       bucketSecretVersion: "0"
-#
-#     # Disable the chart's demo MinIO
-#     minio:
-#       enabled: false
-#
-#     # Mimir configuration
-#     mimir:
-#       structuredConfig:
-#         # Use S3-compatible storage (MinIO)
-#         common:
-#           storage:
-#             backend: s3
-#             s3:
-#               # MinIO endpoint (no TLS)
-#               endpoint: minio.minio.svc.cluster.local:80
-#               access_key_id: "${access_key}"
-#               secret_access_key: "${secret_key}"
-#               insecure: true
-#               # Path-style is typically required for in-cluster MinIO
-#               # s3_force_path_style: true
-#
-#         # Buckets (create them ahead of time)
-#         blocks_storage:
-#           s3:
-#             bucket_name: mimir-blocks
-#         ruler_storage:
-#           s3:
-#             bucket_name: mimir-ruler
-#         alertmanager_storage:
-#           s3:
-#             bucket_name: mimir-alertmanager
-#
-#         # Single-node friendly replication settings
-#         ingester:
-#           ring:
-#             replication_factor: 1
-#             zone_awareness_enabled: false
-#         store_gateway:
-#           sharding_ring:
-#             replication_factor: 1
-#             zone_awareness_enabled: false
-#
-#     # Keep everything at 1 replica initially
-#     alertmanager:
-#       replicas: 1
-#       persistentVolume:
-#         enabled: true
-#       # For single-node + 3 replicas experimentation:
-#       zoneAwareReplication:
-#         enabled: false
-#       # affinity: {}
-#       # topologySpreadConstraints: []
-#
-#     compactor:
-#       replicas: 1
-#       persistentVolume:
-#         enabled: true
-#
-#     distributor:
-#       replicas: 1
-#
-#     ingester:
-#       replicas: 1
-#       persistentVolume:
-#         enabled: true
-#       # If you try 3 replicas on a single node:
-#       zoneAwareReplication:
-#         enabled: false
-#       # affinity: {}
-#       # topologySpreadConstraints: []
-#
-#     querier:
-#       replicas: 1
-#
-#     query_frontend:
-#       replicas: 1
-#
-#     query_scheduler:
-#       replicas: 1
-#
-#     ruler:
-#       replicas: 1
-#       # Enable local ruler as usual; it will use ruler_storage above
-#       enabled: true
-#
-#     store_gateway:
-#       replicas: 1
-#       persistentVolume:
-#         enabled: true
-#       zoneAwareReplication:
-#         enabled: false
-#       # If you try 3 replicas on a single node:
-#       # affinity: {}
-#       # topologySpreadConstraints: []
-#
-#     nginx:
-#       replicas: 1
-#       service:
-#         type: ClusterIP
-#
-#     # Rollout Operator is not needed without zone-aware replication
-#     rollout_operator:
-#       enabled: false
-#
-#     # Hints if you want to experiment with 3 replicas on a single node:
-#     # 1) Set replicas: 3 on ingester, store_gateway, distributor, querier,
-#     #    query_frontend, ruler, alertmanager, nginx as desired.
-#     # 2) Ensure chart-level zone awareness is disabled:
-#     #      ingester.zoneAwareReplication.enabled: false
-#     #      store_gateway.zoneAwareReplication.enabled: false
-#     # 3) Disable anti-affinity/topology spread to co-schedule on 1 node:
-#     #      <component>.affinity: {}
-#     #      <component>.topologySpreadConstraints: []
-#     # 4) If you raise to 3 replicas and want quorum writes, change:
-#     #      mimir.structuredConfig.ingester.ring.replication_factor: 3
-#     #      mimir.structuredConfig.store_gateway.sharding_ring.replication_factor: 3
-#     #    (Leaving them at 1 is fine for a single-node lab, but not HA.)
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: mimir
+  namespace: observability
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: mimir-distributed
+      version: "5.8.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+      interval: 1h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # Inject S3 credentials from your existing Secret as env vars
+    # access_key -> ${access_key}, secret_key -> ${secret_key}
+    global:
+      extraEnvFrom:
+        - secretRef:
+            name: mimir-minio-user
+
+    # Optional: bump this string to force pod restarts if credentials change
+    podAnnotations:
+      bucketSecretVersion: "0"
+
+    # Disable the chart's demo MinIO
+    minio:
+      enabled: false
+
+    # Mimir configuration
+    mimir:
+      structuredConfig:
+        # Use S3-compatible storage (MinIO)
+        common:
+          storage:
+            backend: s3
+            s3:
+              # MinIO endpoint (no TLS)
+              endpoint: minio.minio.svc.cluster.local:80
+              access_key_id: "${access_key}"
+              secret_access_key: "${secret_key}"
+              insecure: true
+              # Path-style is typically required for in-cluster MinIO
+              # s3_force_path_style: true
+
+        # Buckets (create them ahead of time)
+        blocks_storage:
+          s3:
+            bucket_name: mimir-blocks
+        ruler_storage:
+          s3:
+            bucket_name: mimir-ruler
+        alertmanager_storage:
+          s3:
+            bucket_name: mimir-alertmanager
+
+        # Single-node friendly replication settings
+        ingester:
+          ring:
+            replication_factor: 1
+            zone_awareness_enabled: false
+        store_gateway:
+          sharding_ring:
+            replication_factor: 1
+            zone_awareness_enabled: false
+
+    # Keep everything at 1 replica initially
+    alertmanager:
+      replicas: 1
+      persistentVolume:
+        enabled: true
+      # For single-node + 3 replicas experimentation:
+      zoneAwareReplication:
+        enabled: false
+      # affinity: {}
+      # topologySpreadConstraints: []
+
+    compactor:
+      replicas: 1
+      persistentVolume:
+        enabled: true
+
+    distributor:
+      replicas: 1
+
+    ingester:
+      replicas: 1
+      persistentVolume:
+        enabled: true
+      # If you try 3 replicas on a single node:
+      zoneAwareReplication:
+        enabled: false
+      # affinity: {}
+      # topologySpreadConstraints: []
+
+    querier:
+      replicas: 1
+
+    query_frontend:
+      replicas: 1
+
+    query_scheduler:
+      replicas: 1
+
+    ruler:
+      replicas: 1
+      # Enable local ruler as usual; it will use ruler_storage above
+      enabled: true
+
+    store_gateway:
+      replicas: 1
+      persistentVolume:
+        enabled: true
+      zoneAwareReplication:
+        enabled: false
+      # If you try 3 replicas on a single node:
+      # affinity: {}
+      # topologySpreadConstraints: []
+
+    nginx:
+      replicas: 1
+      service:
+        type: ClusterIP
+
+    # Rollout Operator is not needed without zone-aware replication
+    rollout_operator:
+      enabled: false
+
+    # Hints if you want to experiment with 3 replicas on a single node:
+    # 1) Set replicas: 3 on ingester, store_gateway, distributor, querier,
+    #    query_frontend, ruler, alertmanager, nginx as desired.
+    # 2) Ensure chart-level zone awareness is disabled:
+    #      ingester.zoneAwareReplication.enabled: false
+    #      store_gateway.zoneAwareReplication.enabled: false
+    # 3) Disable anti-affinity/topology spread to co-schedule on 1 node:
+    #      <component>.affinity: {}
+    #      <component>.topologySpreadConstraints: []
+    # 4) If you raise to 3 replicas and want quorum writes, change:
+    #      mimir.structuredConfig.ingester.ring.replication_factor: 3
+    #      mimir.structuredConfig.store_gateway.sharding_ring.replication_factor: 3
+    #    (Leaving them at 1 is fine for a single-node lab, but not HA.)
