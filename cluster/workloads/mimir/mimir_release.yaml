@@ -56,11 +56,14 @@ spec:
         blocks_storage:
           s3:
             bucket_name: mimir-blocks
+            s3_force_path_style: true
         ruler_storage:
           s3:
+            s3_force_path_style: true
             bucket_name: mimir-ruler
         alertmanager_storage:
           s3:
+            s3_force_path_style: true
             bucket_name: mimir-alertmanager
 
         # Single-node friendly replication settings
