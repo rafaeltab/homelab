@@ -37,7 +37,6 @@ spec:
       buckets:
         - name: loki-chunks
         - name: loki-ruler
-        - name: loki-index
     ingress:
       console:
         enabled: true
