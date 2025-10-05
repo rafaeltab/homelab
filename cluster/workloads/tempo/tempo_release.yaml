@@ -1,144 +1,144 @@
-# apiVersion: helm.toolkit.fluxcd.io/v2
-# kind: HelmRelease
-# metadata:
-#   name: tempo
-#   namespace: observability
-# spec:
-#   interval: 5m
-#   chart:
-#     spec:
-#       chart: tempo-distributed
-#       version: "1.48.0"
-#       sourceRef:
-#         kind: HelmRepository
-#         name: grafana
-#         namespace: flux-system
-#       interval: 1h
-#   install:
-#     remediation:
-#       retries: 3
-#   upgrade:
-#     remediation:
-#       retries: 3
-#   values:
-#     # Inject the existing MinIO credentials secret as env for all pods.
-#     # The chart supports env expansion in the config when -config.expand-env=true is set.
-#     global:
-#       extraEnvFrom:
-#         - secretRef:
-#             name: tempo-minio-user
-#
-#     # Tempo configuration file (passed through tpl). Uses env expansion.
-#     # Credentials are read from the injected secret:
-#     #   access_key -> AWS_ACCESS_KEY_ID
-#     #   secret_key -> AWS_SECRET_ACCESS_KEY
-#     # The chart adds -config.expand-env=true automatically when needed.
-#     config: |
-#       server:
-#         http_listen_port: 3200
-#         grpc_listen_port: 9095
-#
-#       distributor:
-#         receivers:
-#           otlp:
-#             protocols:
-#               http: {}
-#               grpc: {}
-#
-#       ingester:
-#         # Keep defaults for low volume. WAL disabled by default in chart unless configured.
-#         # If you later enable multiple ingesters, set a sane replication_factor (e.g., 1 or 2)
-#         # and consider persistence for WAL.
-#         max_block_bytes: 104857600
-#         max_block_duration: 5m
-#
-#       compactor:
-#         # Keep forever: set block_retention to 0s
-#         compaction:
-#           block_retention: 0s
-#           compacted_block_retention: 1h
-#           compaction_window: 1h
-#
-#       storage:
-#         trace:
-#           backend: s3
-#           s3:
-#             endpoint: minio.minio.svc.cluster.local:80
-#             bucket: tempo-blocks
-#             insecure: true
-#             # Map your secret keys to envs used here
-#             access_key: ${AWS_ACCESS_KEY_ID:-${access_key:-}}
-#             secret_key: ${AWS_SECRET_ACCESS_KEY:-${secret_key:-}}
-#
-#       memberlist:
-#         join_members:
-#           - tempo-gossip-ring
-#
-#       usage_report:
-#         reporting_enabled: false
-#
-#     # Gossip ring service for memberlist
-#     memcached:
-#       enabled: false
-#
-#     # Create the memberlist headless service
-#     serviceAccount:
-#       create: true
-#
-#     # Replicas set to 1 across the board for single-node deployment.
-#     # To test 3 replicas on a single node, uncomment replicas: 3 and
-#     # set affinity to an empty string "" (disables default hard anti-affinity),
-#     # or provide a soft anti-affinity snippet.
-#     distributor:
-#       replicas: 1
-#       # replicas: 3
-#       # affinity: "" # disables default hard anti-affinity
-#       # Example soft anti-affinity:
-#       # affinity: |
-#       #   podAntiAffinity:
-#       #     preferredDuringSchedulingIgnoredDuringExecution:
-#       #       - weight: 1
-#       #         podAffinityTerm:
-#       #           topologyKey: kubernetes.io/hostname
-#
-#     ingester:
-#       replicas: 1
-#       # If scaling ingesters on a single node, also disable default anti-affinity:
-#       # affinity: ""
-#
-#     compactor:
-#       replicas: 1
-#       # affinity: ""
-#
-#     querier:
-#       replicas: 1
-#       # replicas: 3
-#       # affinity: ""
-#
-#     queryFrontend:
-#       replicas: 1
-#       # replicas: 3
-#       # affinity: ""
-#
-#     queryScheduler:
-#       enabled: true
-#       replicas: 1
-#       # replicas: 3
-#       # affinity: ""
-#
-#     gateway:
-#       enabled: true
-#       replicas: 1
-#       service:
-#         type: ClusterIP
-#       # replicas: 3
-#       # affinity: ""
-#
-#     # Metrics generator disabled per your request
-#     metricsGenerator:
-#       enabled: false
-#
-#     # Internal-only; no ingress
-#     metaMonitoring:
-#       serviceMonitor:
-#         enabled: false
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tempo
+  namespace: observability
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: tempo-distributed
+      version: "1.48.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+      interval: 1h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # Inject the existing MinIO credentials secret as env for all pods.
+    # The chart supports env expansion in the config when -config.expand-env=true is set.
+    global:
+      extraEnvFrom:
+        - secretRef:
+            name: tempo-minio-user
+
+    # Tempo configuration file (passed through tpl). Uses env expansion.
+    # Credentials are read from the injected secret:
+    #   access_key -> AWS_ACCESS_KEY_ID
+    #   secret_key -> AWS_SECRET_ACCESS_KEY
+    # The chart adds -config.expand-env=true automatically when needed.
+    config: |
+      server:
+        http_listen_port: 3200
+        grpc_listen_port: 9095
+
+      distributor:
+        receivers:
+          otlp:
+            protocols:
+              http: {}
+              grpc: {}
+
+      ingester:
+        # Keep defaults for low volume. WAL disabled by default in chart unless configured.
+        # If you later enable multiple ingesters, set a sane replication_factor (e.g., 1 or 2)
+        # and consider persistence for WAL.
+        max_block_bytes: 104857600
+        max_block_duration: 5m
+
+      compactor:
+        # Keep forever: set block_retention to 0s
+        compaction:
+          block_retention: 0s
+          compacted_block_retention: 1h
+          compaction_window: 1h
+
+      storage:
+        trace:
+          backend: s3
+          s3:
+            endpoint: minio.minio.svc.cluster.local:80
+            bucket: tempo-blocks
+            insecure: true
+            # Map your secret keys to envs used here
+            access_key: ${AWS_ACCESS_KEY_ID:-${access_key:-}}
+            secret_key: ${AWS_SECRET_ACCESS_KEY:-${secret_key:-}}
+
+      memberlist:
+        join_members:
+          - tempo-gossip-ring
+
+      usage_report:
+        reporting_enabled: false
+
+    # Gossip ring service for memberlist
+    memcached:
+      enabled: false
+
+    # Create the memberlist headless service
+    serviceAccount:
+      create: true
+
+    # Replicas set to 1 across the board for single-node deployment.
+    # To test 3 replicas on a single node, uncomment replicas: 3 and
+    # set affinity to an empty string "" (disables default hard anti-affinity),
+    # or provide a soft anti-affinity snippet.
+    distributor:
+      replicas: 1
+      # replicas: 3
+      # affinity: "" # disables default hard anti-affinity
+      # Example soft anti-affinity:
+      # affinity: |
+      #   podAntiAffinity:
+      #     preferredDuringSchedulingIgnoredDuringExecution:
+      #       - weight: 1
+      #         podAffinityTerm:
+      #           topologyKey: kubernetes.io/hostname
+
+    ingester:
+      replicas: 1
+      # If scaling ingesters on a single node, also disable default anti-affinity:
+      # affinity: ""
+
+    compactor:
+      replicas: 1
+      # affinity: ""
+
+    querier:
+      replicas: 1
+      # replicas: 3
+      # affinity: ""
+
+    queryFrontend:
+      replicas: 1
+      # replicas: 3
+      # affinity: ""
+
+    queryScheduler:
+      enabled: true
+      replicas: 1
+      # replicas: 3
+      # affinity: ""
+
+    gateway:
+      enabled: true
+      replicas: 1
+      service:
+        type: ClusterIP
+      # replicas: 3
+      # affinity: ""
+
+    # Metrics generator disabled per your request
+    metricsGenerator:
+      enabled: false
+
+    # Internal-only; no ingress
+    metaMonitoring:
+      serviceMonitor:
+        enabled: false
