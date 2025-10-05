@@ -79,8 +79,8 @@ spec:
       persistentVolume:
         enabled: true
       # For single-node + 3 replicas experimentation:
-      # zoneAwareReplication:
-      #   enabled: false
+      zoneAwareReplication:
+        enabled: false
       # affinity: {}
       # topologySpreadConstraints: []
 
@@ -97,8 +97,8 @@ spec:
       persistentVolume:
         enabled: true
       # If you try 3 replicas on a single node:
-      # zoneAwareReplication:
-      #   enabled: false
+      zoneAwareReplication:
+        enabled: false
       # affinity: {}
       # topologySpreadConstraints: []
 
