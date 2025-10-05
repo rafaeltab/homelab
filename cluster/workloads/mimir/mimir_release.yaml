@@ -50,20 +50,17 @@ spec:
               secret_access_key: "${secret_key}"
               insecure: true
               # Path-style is typically required for in-cluster MinIO
-              s3_force_path_style: true
+              # s3_force_path_style: true
 
         # Buckets (create them ahead of time)
         blocks_storage:
           s3:
             bucket_name: mimir-blocks
-            s3_force_path_style: true
         ruler_storage:
           s3:
-            s3_force_path_style: true
             bucket_name: mimir-ruler
         alertmanager_storage:
           s3:
-            s3_force_path_style: true
             bucket_name: mimir-alertmanager
 
         # Single-node friendly replication settings
