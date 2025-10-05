@@ -34,9 +34,14 @@ spec:
           volumesPerServer: 1
       users:
         - name: loki-minio-user
+        - name: mimir-minio-user
       buckets:
         - name: loki-chunks
         - name: loki-ruler
+
+        - name: mimir-blocks
+        - name: mimir-ruler
+        - name: mimir-alertmanager
     ingress:
       console:
         enabled: true
