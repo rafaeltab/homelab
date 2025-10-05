@@ -33,7 +33,7 @@ spec:
           servers: 1
           volumesPerServer: 1
       users:
-        - loki-minio-user
+        - name: loki-minio-user
       buckets:
         - name: loki-chunks
         - name: loki-ruler
