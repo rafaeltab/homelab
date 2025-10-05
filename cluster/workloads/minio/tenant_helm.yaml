@@ -43,6 +43,8 @@ spec:
         - name: mimir-blocks
         - name: mimir-ruler
         - name: mimir-alertmanager
+
+        - name: tempo-blocks
     ingress:
       console:
         enabled: true
