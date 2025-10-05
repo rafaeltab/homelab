@@ -70,6 +70,8 @@ spec:
     distributor:
       replicas: 3
       maxUnavailable: 2
+      affinity: {}
+      topologySpreadConstraints: []
       extraArgs:
         - "-config.expand-env=true"
       extraEnvFrom:
