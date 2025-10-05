@@ -79,6 +79,8 @@ spec:
             name: loki-minio-user
     ingester:
       replicas: 1
+      zoneAwareReplication:
+        enabled: false
       extraArgs:
         - "-config.expand-env=true"
       extraEnvFrom:
