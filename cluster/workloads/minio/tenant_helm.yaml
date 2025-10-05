@@ -32,6 +32,12 @@ spec:
         - name: pool-0
           servers: 1
           volumesPerServer: 1
+      users:
+        - loki-minio-user
+      buckets:
+        - name: loki-chunks
+        - name: loki-ruler
+        - name: loki-index
     ingress:
       console:
         enabled: true
