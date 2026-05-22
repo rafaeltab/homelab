@@ -1,0 +1,75 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: grafana
+      version: "9.2.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+      interval: 1h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    adminPassword: admin
+
+    service:
+      type: ClusterIP
+
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: Mimir
+            type: prometheus
+            access: proxy
+            url: http://mimir-nginx.observability.svc.cluster.local/prometheus
+            isDefault: true
+            editable: false
+          - name: Loki
+            type: loki
+            access: proxy
+            url: http://loki-gateway.observability.svc.cluster.local
+            editable: false
+          - name: Tempo
+            type: tempo
+            access: proxy
+            url: http://tempo-gateway.observability.svc.cluster.local
+            editable: false
+            jsonData:
+              tracesToMetrics:
+                datasourceUid: mimir
+              tracesToLogs:
+                datasourceUid: loki
+              serviceMap:
+                datasourceUid: mimir
+
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+          - name: default
+            orgId: 1
+            folder: ""
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/default
+
+    dashboards:
+      default:
+        kubernetes-views-pods:
+          gnetId: 15760
+          revision: 16
+          datasource: Mimir
