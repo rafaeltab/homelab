@@ -25,6 +25,8 @@ spec:
       extraEnvFrom:
         - secretRef:
             name: tempo-minio-user
+      extraArgs:
+        - "-config.expand-env=true"
 
     config: |
       server:
@@ -73,42 +75,28 @@ spec:
 
     distributor:
       replicas: 1
-      extraArgs:
-        - "-config.expand-env=true"
 
     ingester:
       replicas: 1
-      extraArgs:
-        - "-config.expand-env=true"
 
     compactor:
       replicas: 1
-      extraArgs:
-        - "-config.expand-env=true"
 
     querier:
       replicas: 1
-      extraArgs:
-        - "-config.expand-env=true"
 
     queryFrontend:
       replicas: 1
-      extraArgs:
-        - "-config.expand-env=true"
 
     queryScheduler:
       enabled: true
       replicas: 1
-      extraArgs:
-        - "-config.expand-env=true"
 
     gateway:
       enabled: true
       replicas: 1
       service:
         type: ClusterIP
-      extraArgs:
-        - "-config.expand-env=true"
 
     metricsGenerator:
       enabled: false
