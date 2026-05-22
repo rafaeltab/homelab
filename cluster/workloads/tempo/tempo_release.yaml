@@ -25,6 +25,8 @@ spec:
       extraEnvFrom:
         - secretRef:
             name: tempo-minio-user
+      extraArgs:
+        config.expand-env: true
 
     config: |
       server:
