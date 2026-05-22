@@ -67,6 +67,19 @@ spec:
             options:
               path: /var/lib/grafana/dashboards/default
 
+    ingress:
+      enabled: true
+      ingressClassName: "traefik"
+      annotations:
+        traefik.ingress.kubernetes.io/router.entrypoints: web
+        traefik.ingress.kubernetes.io/router.tls: "true"
+      hosts:
+        - grafana.network.rafaeltab.com
+      tls:
+        - hosts:
+            - "grafana.network.rafaeltab.com"
+          secretName: grafana-network-rafaeltab-com-tls
+
     dashboards:
       default:
         kubernetes-views-pods:

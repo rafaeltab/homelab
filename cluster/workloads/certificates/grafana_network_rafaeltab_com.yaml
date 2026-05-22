@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: grafana-network-rafaeltab-com
+  namespace: observability
+spec:
+  secretName: grafana-network-rafaeltab-com-tls
+  renewBefore: 240h
+  dnsNames:
+    - "grafana.network.rafaeltab.com"
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
