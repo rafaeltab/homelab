@@ -53,6 +53,7 @@ spec:
             block_retention: 0s
         usage_report:
           reporting_enabled: false
+        cache: null
 
     memcached:
       enabled: false
@@ -74,6 +75,8 @@ spec:
 
     queryFrontend:
       replicas: 1
+      extraArgs:
+        - "-config.expand-env=true"
 
     queryScheduler:
       enabled: true
