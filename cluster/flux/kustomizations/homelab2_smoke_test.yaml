@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: homelab2-flux-smoke-test
+  namespace: flux-system
+data:
+  pushedFrom: homelab2
