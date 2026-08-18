@@ -21,7 +21,15 @@ spec:
     remediation:
       retries: 3
   values:
-    adminPassword: admin
+    admin:
+      existingSecret: grafana-admin-credentials
+      userKey: admin-user
+      passwordKey: admin-password
+
+    persistence:
+      enabled: true
+      storageClassName: zfs-local-persistent
+      size: 2Gi
 
     service:
       type: ClusterIP
@@ -31,17 +39,20 @@ spec:
         apiVersion: 1
         datasources:
           - name: Mimir
+            uid: mimir
             type: prometheus
             access: proxy
             url: http://mimir-nginx.observability.svc.cluster.local/prometheus
             isDefault: true
             editable: false
           - name: Loki
+            uid: loki
             type: loki
             access: proxy
             url: http://loki-gateway.observability.svc.cluster.local
             editable: false
           - name: Tempo
+            uid: tempo
             type: tempo
             access: proxy
             url: http://tempo-gateway.observability.svc.cluster.local

@@ -1,0 +1,86 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: k8s-monitoring
+  namespace: observability
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: k8s-monitoring
+      version: "4.4.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+      interval: 1h
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  values:
+    cluster:
+      name: homelab1
+
+    destinations:
+      mimir:
+        type: prometheus
+        url: http://mimir-nginx.observability.svc.cluster.local/api/v1/push
+        auth:
+          type: none
+
+    clusterMetrics:
+      enabled: true
+      destinations:
+        - mimir
+      collector: alloy-metrics
+      kubelet:
+        enabled: false
+      kubeletResource:
+        enabled: false
+      cadvisor:
+        enabled: true
+        metricsTuning:
+          useDefaultAllowList: true
+          includeMetrics:
+            - container_network_receive_errors_total
+            - container_network_transmit_errors_total
+      kube-state-metrics:
+        enabled: true
+
+    selfReporting:
+      enabled: false
+
+    collectors:
+      alloy-metrics:
+        presets:
+          - deployment
+        alloy:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+
+    telemetryServices:
+      kube-state-metrics:
+        deploy: true
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 128Mi
+
+    alloy-operator:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 128Mi
