@@ -46,6 +46,9 @@ spec:
                 http: {}
                 grpc: {}
         ingester:
+          lifecycler:
+            ring:
+              replication_factor: 1
           max_block_bytes: 104857600
           max_block_duration: 5m
         compactor:
