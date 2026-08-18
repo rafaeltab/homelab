@@ -22,6 +22,8 @@
             zsh
             gum
             fluxcd
+            kubectl
+            gh
             gnupg
             sops
           ];
