@@ -49,6 +49,8 @@ spec:
     reportingEnabled: false
 
     global:
+      extraArgs:
+        - -config.expand-env=true
       extraEnv:
         - name: access_key
           valueFrom:
@@ -167,6 +169,9 @@ spec:
 
     memcached:
       enabled: false
+
+    cache:
+      caches: []
 
     rollout_operator:
       enabled: false
