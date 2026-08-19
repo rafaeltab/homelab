@@ -63,19 +63,11 @@ spec:
           s3:
             bucket_name: mimir-alertmanager
 
-        # Migration window: accept the approximately 30-day source history,
-        # including samples older than and out of order with live ingestion.
-        # Keep finite windows rather than disabling validation globally.
+        # Retain metric blocks for five years. Historical replay-only
+        # acceptance, query, and throughput overrides were removed after the
+        # archive reconciled with zero missing samples and zero conflicts.
         limits:
-          past_grace_period: 744h
-          out_of_order_time_window: 744h
           compactor_blocks_retention_period: 43800h
-          # Temporary replay throughput; revert after the archive is verified.
-          ingestion_rate: 1000000
-          ingestion_burst_size: 500000
-          # Newly accepted historical samples remain in ingesters before block
-          # shipment; query the full migration window for exact verification.
-          query_ingesters_within: 744h
 
         # Single-node friendly replication settings
         ingester:
