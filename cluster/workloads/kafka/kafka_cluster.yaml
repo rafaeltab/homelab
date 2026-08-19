@@ -12,8 +12,10 @@ spec:
     - broker
   resources:
     requests:
-      cpu: 250m
-      memory: 768Mi
+      cpu: 100m
+      # The node already carries conservative requests from the observability
+      # charts; keep Kafka schedulable while its JVM remains capped below.
+      memory: 64Mi
     limits:
       cpu: "1"
       memory: 1536Mi
