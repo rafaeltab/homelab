@@ -59,6 +59,11 @@ spec:
             block_retention: 43800h
         usage_report:
           reporting_enabled: false
+        overrides:
+          defaults:
+            metrics_generator:
+              processors:
+                - local-blocks
         cache: null
 
     memcached:
@@ -95,7 +100,12 @@ spec:
         type: ClusterIP
 
     metricsGenerator:
-      enabled: false
+      enabled: true
+      replicas: 1
+      walEmptyDir: {}
+      config:
+        processor:
+          local_blocks: {}
 
     metaMonitoring:
       serviceMonitor:
