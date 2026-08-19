@@ -171,7 +171,7 @@ metadata:
 spec:
   selector:
     app.kubernetes.io/component: distributor
-    app.kubernetes.io/instance: tempo
+    app.kubernetes.io/instance: tempo-v3
     app.kubernetes.io/name: tempo
   ports:
     - name: otlp-http
