@@ -70,6 +70,9 @@ spec:
           past_grace_period: 744h
           out_of_order_time_window: 744h
           compactor_blocks_retention_period: 43800h
+          # Temporary replay throughput; revert after the archive is verified.
+          ingestion_rate: 1000000
+          ingestion_burst_size: 500000
           # Newly accepted historical samples remain in ingesters before block
           # shipment; query the full migration window for exact verification.
           query_ingesters_within: 744h
