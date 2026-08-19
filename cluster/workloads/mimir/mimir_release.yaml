@@ -71,6 +71,13 @@ spec:
           out_of_order_time_window: 744h
           compactor_blocks_retention_period: 43800h
 
+        # During historical replay, newly accepted out-of-order samples still
+        # live in ingesters before block shipment. Query the full migration
+        # window so duplicate preflight and post-write verification stay
+        # authoritative instead of waiting for store-gateway synchronization.
+        querier:
+          query_ingesters_within: 744h
+
         # Single-node friendly replication settings
         ingester:
           ring:
