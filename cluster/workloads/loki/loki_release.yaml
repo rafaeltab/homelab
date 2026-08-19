@@ -58,10 +58,14 @@ spec:
         reject_old_samples_max_age: 360h
         retention_period: 43800h # 5 years
       # Temporary migration window: Loki accepts unordered entries only up to
-      # half max_chunk_age behind the newest entry in a stream. 744h permits
-      # the 14-day backfill while live ingestion continues. Revert after replay.
+      # half max_chunk_age behind the newest entry in a stream. Query ingesters
+      # over the same window so accepted historical chunks are immediately
+      # visible for exact duplicate preflight and post-write verification.
+      # Revert both settings after replay.
       ingester:
         max_chunk_age: 744h
+      querier:
+        query_ingesters_within: 744h
       compactor:
         retention_enabled: true
         delete_request_store: s3
