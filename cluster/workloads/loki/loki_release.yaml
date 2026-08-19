@@ -8,10 +8,10 @@ spec:
   chart:
     spec:
       chart: loki
-      version: "6.41.1"
+      version: "18.9.0"
       sourceRef:
         kind: HelmRepository
-        name: grafana
+        name: grafana-community
         namespace: flux-system
       interval: 1h
   install:
@@ -31,6 +31,10 @@ spec:
     # Only expose in-cluster
     gateway:
       enabled: true
+      # Required on the single-node cluster: hard pod anti-affinity prevents
+      # old and new gateway pods from coexisting during a rolling update.
+      deploymentStrategy:
+        type: Recreate
       service:
         type: ClusterIP
 
@@ -130,7 +134,10 @@ spec:
         - secretRef:
             name: loki-minio-user
     ruler:
-      # Deployed by default; inherits storage via loki.storage and needs creds
+      # The existing ruler StatefulSet has always had zero replicas. Disable
+      # the unused workload explicitly; chart 18 also changes its immutable
+      # serviceName from loki-ruler to loki-ruler-headless.
+      enabled: false
       extraArgs:
         - "-config.expand-env=true"
       extraEnvFrom:
