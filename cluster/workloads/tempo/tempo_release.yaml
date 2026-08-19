@@ -107,6 +107,7 @@ spec:
     gateway:
       enabled: true
       replicas: 1
+      affinity: ""
       service:
         type: ClusterIP
 
