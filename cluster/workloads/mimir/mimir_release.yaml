@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: mimir-distributed
-      version: "5.8.0"
+      version: "6.0.2"
       sourceRef:
         kind: HelmRepository
         name: grafana
@@ -34,6 +34,10 @@ spec:
 
     # Disable the chart's demo MinIO
     minio:
+      enabled: false
+
+    # Keep classic ingestion for this upgrade phase.
+    kafka:
       enabled: false
 
     # Mimir configuration
@@ -70,7 +74,12 @@ spec:
           compactor_blocks_retention_period: 43800h
 
         # Single-node friendly replication settings
+        ingest_storage:
+          enabled: false
         ingester:
+          # Chart 6 defaults to Kafka-backed ingest storage. Keep the classic
+          # push path enabled until Kafka is deliberately introduced.
+          push_grpc_method_enabled: true
           ring:
             replication_factor: 1
             zone_awareness_enabled: false
@@ -132,16 +141,10 @@ spec:
       # affinity: {}
       # topologySpreadConstraints: []
 
-    # Use the unified gateway before moving to chart 6.x. Keep the existing
-    # Service name so Grafana and telemetry writers do not need a coordinated
-    # endpoint migration.
-    nginx:
-      enabled: false
+    # Use the unified gateway while keeping the existing Service name so
+    # Grafana and telemetry writers retain a stable endpoint.
     gateway:
       enabled: true
-      # Required by chart 5.8 to opt OSS Mimir into the unified gateway.
-      # Remove this compatibility flag when moving to chart 6.x.
-      enabledNonEnterprise: true
       replicas: 1
       strategy:
         type: Recreate
