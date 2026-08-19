@@ -76,6 +76,10 @@ assert "dashboards/kubernetes" in text("grafana.yaml")
 assert "dashboards/general" in text("grafana.yaml")
 assert "dashboards/hermes" in text("grafana.yaml")
 
+grafana_deployments = [d for d in documents("grafana.yaml") if d["kind"] == "Deployment"]
+assert len(grafana_deployments) == 1
+assert grafana_deployments[0]["spec"]["strategy"] == {"type": "Recreate"}
+
 rendered = documents("grafana-gitops.yaml")
 configmaps = {d["metadata"]["name"]: d for d in rendered if d["kind"] == "ConfigMap"}
 assert set(configmaps) == {
@@ -90,5 +94,5 @@ for cm in configmaps.values():
     for value in cm["data"].values():
         json.loads(value)
 print("rendered YAML documents:", counts)
-print("retention/backfill/storage fields and dashboard ConfigMaps: OK")
+print("retention/backfill/storage fields, Grafana Recreate strategy, and dashboard ConfigMaps: OK")
 PY

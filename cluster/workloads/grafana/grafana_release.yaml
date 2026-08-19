@@ -31,6 +31,10 @@ spec:
       storageClassName: zfs-local-persistent
       size: 2Gi
 
+    # The single-node ReadWriteOnce PVC cannot be mounted by old and new pods concurrently.
+    deploymentStrategy:
+      type: Recreate
+
     service:
       type: ClusterIP
 
