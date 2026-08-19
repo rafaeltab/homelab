@@ -12,6 +12,7 @@ resources:
   - 005_registry.yaml
   - 005_strimzi.yaml
   - 006_grafana.yaml
+  - 006_kafka.yaml
   - 006_loki.yaml
   - 006_mimir.yaml
   - 006_tempo.yaml
