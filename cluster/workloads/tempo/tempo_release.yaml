@@ -57,6 +57,10 @@ spec:
           compaction:
             # Keep migrated and new traces for five years.
             block_retention: 43800h
+        query_frontend:
+          metrics:
+            # Allow TraceQL metrics range queries over a full day.
+            max_duration: 24h
         usage_report:
           reporting_enabled: false
         overrides:
