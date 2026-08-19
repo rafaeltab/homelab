@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: tempo-distributed
-      version: "1.48.0"
+      version: "1.61.3"
       sourceRef:
         kind: HelmRepository
         name: grafana
@@ -58,6 +58,8 @@ spec:
             # Keep migrated and new traces for five years.
             block_retention: 43800h
         query_frontend:
+          mcp_server:
+            enabled: true
           metrics:
             # Allow TraceQL metrics range queries over a full day.
             max_duration: 24h
