@@ -108,13 +108,7 @@ spec:
             - "grafana.homelab1.local.rafaeltab.com"
           secretName: grafana-homelab1-local-rafaeltab-com-tls
 
-    dashboards:
-      kubernetes:
-        kubernetes-views-pods:
-          gnetId: 15760
-          revision: 16
-          datasource: Mimir
-
     dashboardsConfigMaps:
+      kubernetes: grafana-dashboards-kubernetes
       general: grafana-dashboards-general
       hermes: grafana-dashboards-hermes

@@ -69,14 +69,19 @@ assert "block_retention: 43800h" in text("tempo.yaml")
 assert "storage: 100Gi" in text("minio.yaml")
 assert "folderUid: hermes" in text("grafana.yaml")
 assert "folder: Hermes" in text("grafana.yaml")
-assert "kubernetes-views-pods" in text("grafana.yaml")
+assert "grafana-dashboards-kubernetes" in text("grafana.yaml")
+assert "kubernetes-views-pods" not in text("grafana.yaml")
+assert "grafana-dashboards-default" not in text("grafana.yaml")
 assert "dashboards/kubernetes" in text("grafana.yaml")
 assert "dashboards/general" in text("grafana.yaml")
 assert "dashboards/hermes" in text("grafana.yaml")
 
 rendered = documents("grafana-gitops.yaml")
 configmaps = {d["metadata"]["name"]: d for d in rendered if d["kind"] == "ConfigMap"}
-assert set(configmaps) == {"grafana-dashboards-general", "grafana-dashboards-hermes"}
+assert set(configmaps) == {
+    "grafana-dashboards-kubernetes", "grafana-dashboards-general", "grafana-dashboards-hermes"
+}
+assert set(configmaps["grafana-dashboards-kubernetes"]["data"]) == {"k8s_views_pods.json"}
 assert set(configmaps["grafana-dashboards-general"]["data"]) == {"adrk6nd.json"}
 assert set(configmaps["grafana-dashboards-hermes"]["data"]) == {
     "hermes-usage.json", "hermes-reliability.json"

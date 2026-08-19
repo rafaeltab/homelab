@@ -5,6 +5,10 @@ resources:
 generatorOptions:
   disableNameSuffixHash: true
 configMapGenerator:
+  - name: grafana-dashboards-kubernetes
+    namespace: observability
+    files:
+      - dashboards/k8s_views_pods.json
   - name: grafana-dashboards-general
     namespace: observability
     files:

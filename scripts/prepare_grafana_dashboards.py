@@ -39,6 +39,12 @@ EXPECTED = {
         "folder_uid": "",
         "portable_sha256": "b1cca9296745362a08de88d141a0374523c17f4a61057a7919573cb3b301fcc4",
     },
+    "k8s_views_pods": {
+        "title": "Kubernetes / Views / Pods",
+        "panels": 19,
+        "folder_uid": "",
+        "portable_sha256": "d04c01bb5c60a98c4bd90ce979950252373136d9f21f7b590849326b704b840d",
+    },
 }
 
 
