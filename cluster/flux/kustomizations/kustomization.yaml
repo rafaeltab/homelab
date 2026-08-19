@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - 000_namespaces.yaml
+  - 000_helm_repositories.yaml
+  - 001_openebs.yaml
+  - 001_secrets.yaml
+  - 002_cert_manager.yaml
+  - 003_godaddy_webhook.yaml
+  - 004_certificates.yaml
+  - 005_minio.yaml
+  - 005_registry.yaml
+  - 006_grafana.yaml
+  - 006_loki.yaml
+  - 006_mimir.yaml
+  - 006_tempo.yaml
+  - 007_k8s_monitoring.yaml
+  - 008_host_telemetry.yaml

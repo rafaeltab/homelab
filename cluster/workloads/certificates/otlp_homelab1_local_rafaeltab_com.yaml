@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: otlp-homelab1-local-rafaeltab-com
+  namespace: observability
+spec:
+  secretName: otlp-homelab1-local-rafaeltab-com-tls
+  renewBefore: 240h
+  dnsNames:
+    - "otlp.homelab1.local.rafaeltab.com"
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer

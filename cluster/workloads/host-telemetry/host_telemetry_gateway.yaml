@@ -1,0 +1,204 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: host-telemetry-gateway
+  namespace: observability
+data:
+  config.yaml: |
+    extensions:
+      basicauth/ingest:
+        htpasswd:
+          file: /var/run/telemetry-auth/htpasswd
+      file_storage/queue:
+        directory: /var/lib/otelcol/queue
+        create_directory: true
+
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+            auth:
+              authenticator: basicauth/ingest
+
+    processors:
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 75
+        spike_limit_percentage: 20
+      batch:
+        send_batch_size: 2048
+        timeout: 5s
+
+    exporters:
+      prometheusremotewrite/mimir:
+        endpoint: http://mimir-nginx.observability.svc.cluster.local/api/v1/push
+        resource_to_telemetry_conversion:
+          enabled: true
+        remote_write_queue:
+          enabled: true
+          queue_size: 10000
+          num_consumers: 2
+        retry_on_failure:
+          enabled: true
+      otlphttp/loki:
+        endpoint: http://loki-gateway.observability.svc.cluster.local/otlp
+        sending_queue:
+          enabled: true
+          storage: file_storage/queue
+        retry_on_failure:
+          enabled: true
+      otlphttp/tempo:
+        endpoint: http://tempo-distributor-otlp.observability.svc.cluster.local:4318
+        sending_queue:
+          enabled: true
+          storage: file_storage/queue
+        retry_on_failure:
+          enabled: true
+
+    service:
+      extensions: [basicauth/ingest, file_storage/queue]
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [prometheusremotewrite/mimir]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlphttp/loki]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlphttp/tempo]
+      telemetry:
+        logs:
+          level: info
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: host-telemetry-gateway-queue
+  namespace: observability
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: zfs-local-persistent
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: host-telemetry-gateway
+  namespace: observability
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: host-telemetry-gateway
+  template:
+    metadata:
+      labels:
+        app: host-telemetry-gateway
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: otelcol
+          image: otel/opentelemetry-collector-contrib:0.147.0
+          args: ["--config=/etc/otelcol/config.yaml"]
+          ports:
+            - name: otlp-http
+              containerPort: 4318
+          readinessProbe:
+            tcpSocket:
+              port: otlp-http
+          livenessProbe:
+            tcpSocket:
+              port: otlp-http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+              readOnly: true
+            - name: auth
+              mountPath: /var/run/telemetry-auth
+              readOnly: true
+            - name: queue
+              mountPath: /var/lib/otelcol/queue
+      volumes:
+        - name: config
+          configMap:
+            name: host-telemetry-gateway
+        - name: auth
+          secret:
+            secretName: host-telemetry-ingest-auth
+        - name: queue
+          persistentVolumeClaim:
+            claimName: host-telemetry-gateway-queue
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: host-telemetry-gateway
+  namespace: observability
+spec:
+  selector:
+    app: host-telemetry-gateway
+  ports:
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+---
+# The Tempo chart does not expose its enabled OTLP receiver ports on its Service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-distributor-otlp
+  namespace: observability
+spec:
+  selector:
+    app.kubernetes.io/component: distributor
+    app.kubernetes.io/instance: tempo
+    app.kubernetes.io/name: tempo
+  ports:
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: host-telemetry-gateway
+  namespace: observability
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: otlp.homelab1.local.rafaeltab.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: host-telemetry-gateway
+                port:
+                  name: otlp-http
+  tls:
+    - hosts: [otlp.homelab1.local.rafaeltab.com]
+      secretName: otlp-homelab1-local-rafaeltab-com-tls
