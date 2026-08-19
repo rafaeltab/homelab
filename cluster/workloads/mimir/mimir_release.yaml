@@ -132,9 +132,21 @@ spec:
       # affinity: {}
       # topologySpreadConstraints: []
 
+    # Use the unified gateway before moving to chart 6.x. Keep the existing
+    # Service name so Grafana and telemetry writers do not need a coordinated
+    # endpoint migration.
     nginx:
+      enabled: false
+    gateway:
+      enabled: true
+      # Required by chart 5.8 to opt OSS Mimir into the unified gateway.
+      # Remove this compatibility flag when moving to chart 6.x.
+      enabledNonEnterprise: true
       replicas: 1
+      strategy:
+        type: Recreate
       service:
+        nameOverride: mimir-nginx
         type: ClusterIP
 
     # Rollout Operator is not needed without zone-aware replication
