@@ -153,8 +153,8 @@ spec:
     overrides:
       defaults:
         compaction:
-          # Only one compaction system may write to the shared bucket.
-          compaction_disabled: true
+          # Tempo 2 compactor is quiesced; Tempo 3 is now the sole compactor.
+          compaction_disabled: false
         metrics_generator:
           processors:
             - service-graphs
