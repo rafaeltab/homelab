@@ -63,6 +63,14 @@ spec:
           s3:
             bucket_name: mimir-alertmanager
 
+        # Migration window: accept the approximately 30-day source history,
+        # including samples older than and out of order with live ingestion.
+        # Keep finite windows rather than disabling validation globally.
+        limits:
+          past_grace_period: 744h
+          out_of_order_time_window: 744h
+          compactor_blocks_retention_period: 43800h
+
         # Single-node friendly replication settings
         ingester:
           ring:

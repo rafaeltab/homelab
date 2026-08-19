@@ -23,6 +23,8 @@
             gum
             fluxcd
             kubectl
+            kubernetes-helm
+            (python3.withPackages (ps: [ ps.pyyaml ]))
             gh
             gnupg
             sops

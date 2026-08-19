@@ -53,7 +53,8 @@ spec:
           max_block_duration: 5m
         compactor:
           compaction:
-            block_retention: 0s
+            # Keep migrated and new traces for five years.
+            block_retention: 43800h
         usage_report:
           reporting_enabled: false
         cache: null

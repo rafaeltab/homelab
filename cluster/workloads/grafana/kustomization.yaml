@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - grafana_release.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: grafana-dashboards-general
+    namespace: observability
+    files:
+      - dashboards/adrk6nd.json
+  - name: grafana-dashboards-hermes
+    namespace: observability
+    files:
+      - dashboards/hermes-usage.json
+      - dashboards/hermes-reliability.json

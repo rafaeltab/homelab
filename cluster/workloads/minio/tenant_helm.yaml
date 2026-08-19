@@ -32,6 +32,9 @@ spec:
         - name: pool-0
           servers: 1
           volumesPerServer: 1
+          # Initial shared capacity for five-year Loki/Mimir/Tempo retention;
+          # expand this PVC before object-storage utilization approaches 80%.
+          size: 100Gi
       users:
         - name: loki-minio-user
         - name: mimir-minio-user
