@@ -145,6 +145,7 @@ spec:
       replicas: 1
       strategy:
         type: Recreate
+        rollingUpdate: null
       service:
         nameOverride: mimir-nginx
         type: ClusterIP
