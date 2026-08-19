@@ -14,6 +14,22 @@ spec:
         name: grafana
         namespace: flux-system
       interval: 1h
+  # The single-node cluster cannot schedule old and new gateway pods together
+  # because the previous chart applied hard pod anti-affinity. Recreate avoids
+  # deadlocking Helm's rollout while preserving the single gateway replica.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              group: apps
+              version: v1
+              kind: Deployment
+              name: tempo-gateway
+            patch: |
+              - op: add
+                path: /spec/strategy
+                value:
+                  type: Recreate
   install:
     remediation:
       retries: 3
