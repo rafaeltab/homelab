@@ -74,18 +74,23 @@ spec:
 
     distributor:
       replicas: 1
+      affinity: ""
 
     ingester:
       replicas: 1
+      affinity: ""
 
     compactor:
       replicas: 1
+      affinity: ""
 
     querier:
       replicas: 1
+      affinity: ""
 
     queryFrontend:
       replicas: 1
+      affinity: ""
       extraArgs:
         - "-config.expand-env=true"
 
@@ -102,7 +107,13 @@ spec:
     metricsGenerator:
       enabled: true
       replicas: 1
+      affinity: ""
       walEmptyDir: {}
+      extraArgs:
+        - "-config.expand-env=true"
+      extraEnvFrom:
+        - secretRef:
+            name: tempo-minio-user
       config:
         processor:
           local_blocks: {}
