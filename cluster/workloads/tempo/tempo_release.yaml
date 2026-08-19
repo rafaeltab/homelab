@@ -95,15 +95,17 @@ spec:
       create: true
 
     distributor:
-      replicas: 1
+      # Ingestion moved to tempo-v3; retain only the read path for rollback.
+      replicas: 0
       affinity: ""
 
     ingester:
-      replicas: 1
+      replicas: 0
       affinity: ""
 
     compactor:
-      replicas: 1
+      # Tempo 3 takes sole ownership of compaction in the next phase.
+      replicas: 0
       affinity: ""
 
     querier:
@@ -129,7 +131,7 @@ spec:
 
     metricsGenerator:
       enabled: true
-      replicas: 1
+      replicas: 0
       affinity: ""
       walEmptyDir: {}
       extraArgs:
