@@ -115,8 +115,16 @@ spec:
         - secretRef:
             name: tempo-minio-user
       config:
+        # Temporary 31-day acceptance window permits rebuilding TraceQL metrics
+        # from the sealed migration archives without replaying traces into the
+        # ingester. Revert this slack after the backfill is flushed.
+        metrics_ingestion_time_range_slack: 744h
         processor:
-          local_blocks: {}
+          local_blocks:
+            filter_server_spans: false
+            flush_to_storage: true
+            flush_check_period: 1s
+            max_block_duration: 1m
 
     metaMonitoring:
       serviceMonitor:
