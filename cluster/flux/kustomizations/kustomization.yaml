@@ -10,6 +10,7 @@ resources:
   - 004_certificates.yaml
   - 005_minio.yaml
   - 005_registry.yaml
+  - 005_strimzi.yaml
   - 006_grafana.yaml
   - 006_loki.yaml
   - 006_mimir.yaml
