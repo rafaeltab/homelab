@@ -1,0 +1,172 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tempo-v3
+  namespace: observability
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: tempo-distributed
+      version: "3.2.2"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana-community
+        namespace: flux-system
+      interval: 1h
+  # Hard same-component anti-affinity on this one-node cluster requires
+  # Recreate for one-replica Deployments whose chart does not expose strategy.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              group: apps
+              version: v1
+              kind: Deployment
+              name: tempo-v3-gateway
+            patch: |
+              - op: add
+                path: /spec/strategy
+                value:
+                  type: Recreate
+          - target:
+              group: apps
+              version: v1
+              kind: Deployment
+              name: tempo-v3-metrics-generator
+            patch: |
+              - op: add
+                path: /spec/strategy
+                value:
+                  type: Recreate
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    reportingEnabled: false
+
+    global:
+      extraEnv:
+        - name: access_key
+          valueFrom:
+            secretKeyRef:
+              name: tempo-minio-user
+              key: access_key
+        - name: secret_key
+          valueFrom:
+            secretKeyRef:
+              name: tempo-minio-user
+              key: secret_key
+
+    # Tempo 3 writes and reads vParquet4 blocks in the same bucket as the
+    # Tempo 2.9 bridge. The old compactor remains authoritative during overlap.
+    storage:
+      trace:
+        backend: s3
+        block:
+          version: vParquet4
+        s3:
+          bucket: tempo-blocks
+          endpoint: minio.minio.svc.cluster.local:80
+          insecure: true
+          access_key: ${access_key}
+          secret_key: ${secret_key}
+
+    ingest:
+      kafka:
+        address: tempo-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092
+        topic: tempo-traces
+        auto_create_topic_enabled: false
+        auto_create_topic_default_partitions: 1
+
+    traces:
+      otlp:
+        grpc:
+          enabled: true
+        http:
+          enabled: true
+
+    distributor:
+      replicas: 1
+      maxUnavailable: 1
+      podDisruptionBudget:
+        enabled: false
+
+    blockBuilder:
+      enabled: true
+      replicas: 1
+      config:
+        partitions_per_instance: 1
+      podDisruptionBudget:
+        enabled: false
+
+    liveStore:
+      enabled: true
+      replicas: 1
+      podDisruptionBudget:
+        enabled: false
+
+    backendScheduler:
+      enabled: true
+      podDisruptionBudget:
+        enabled: false
+      config:
+        provider:
+          compaction:
+            compaction:
+              block_retention: 43800h
+
+    backendWorker:
+      replicas: 1
+
+    querier:
+      replicas: 1
+      maxUnavailable: 1
+      podDisruptionBudget:
+        enabled: false
+
+    queryFrontend:
+      replicas: 1
+      maxUnavailable: 1
+      mcp_server:
+        enabled: true
+      podDisruptionBudget:
+        enabled: false
+
+    metricsGenerator:
+      enabled: true
+      replicas: 1
+      podDisruptionBudget:
+        enabled: false
+      config:
+        storage:
+          path: /var/tempo/wal
+          remote_write:
+            - url: http://mimir-nginx.observability.svc.cluster.local/api/v1/push
+              send_exemplars: true
+
+    overrides:
+      defaults:
+        compaction:
+          # Only one compaction system may write to the shared bucket.
+          compaction_disabled: true
+        metrics_generator:
+          processors:
+            - service-graphs
+            - span-metrics
+
+    gateway:
+      enabled: true
+      replicas: 1
+      verboseLogging: false
+      podDisruptionBudget:
+        enabled: false
+
+    memcached:
+      enabled: false
+
+    rollout_operator:
+      enabled: false
