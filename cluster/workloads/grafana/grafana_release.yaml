@@ -37,6 +37,8 @@ spec:
 
     imageRenderer:
       enabled: true
+      deploymentStrategy:
+        type: Recreate
       image:
         tag: "v5.12.1"
         pullPolicy: IfNotPresent
