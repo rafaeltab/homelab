@@ -96,23 +96,6 @@ spec:
             editable: true
             options:
               path: /var/lib/grafana/dashboards/kubernetes
-          - name: general
-            orgId: 1
-            folder: ""
-            type: file
-            disableDeletion: false
-            editable: true
-            options:
-              path: /var/lib/grafana/dashboards/general
-          - name: hermes
-            orgId: 1
-            folder: Hermes
-            folderUid: hermes
-            type: file
-            disableDeletion: false
-            editable: true
-            options:
-              path: /var/lib/grafana/dashboards/hermes
 
     ingress:
       enabled: true
@@ -129,5 +112,3 @@ spec:
 
     dashboardsConfigMaps:
       kubernetes: grafana-dashboards-kubernetes
-      general: grafana-dashboards-general
-      hermes: grafana-dashboards-hermes

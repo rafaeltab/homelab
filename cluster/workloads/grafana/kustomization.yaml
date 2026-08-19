@@ -9,12 +9,3 @@ configMapGenerator:
     namespace: observability
     files:
       - dashboards/k8s_views_pods.json
-  - name: grafana-dashboards-general
-    namespace: observability
-    files:
-      - dashboards/adrk6nd.json
-  - name: grafana-dashboards-hermes
-    namespace: observability
-    files:
-      - dashboards/hermes-usage.json
-      - dashboards/hermes-reliability.json
