@@ -4,6 +4,42 @@ metadata:
   name: host-telemetry-agent
   namespace: observability
 data:
+  zpool-metrics.sh: |
+    #!/bin/sh
+    set -eu
+
+    output=/textfile/zfs_pool.prom
+    while true; do
+      temporary="${output}.tmp"
+      {
+        echo '# HELP zfs_pool_size_bytes Total usable size of the ZFS pool in bytes.'
+        echo '# TYPE zfs_pool_size_bytes gauge'
+        echo '# HELP zfs_pool_allocated_bytes Allocated space in the ZFS pool in bytes.'
+        echo '# TYPE zfs_pool_allocated_bytes gauge'
+        echo '# HELP zfs_pool_free_bytes Free space in the ZFS pool in bytes.'
+        echo '# TYPE zfs_pool_free_bytes gauge'
+        echo '# HELP zfs_pool_capacity_ratio Fraction of usable ZFS pool space allocated.'
+        echo '# TYPE zfs_pool_capacity_ratio gauge'
+        echo '# HELP zfs_pool_fragmentation_ratio Fraction of ZFS pool space reported as fragmented.'
+        echo '# TYPE zfs_pool_fragmentation_ratio gauge'
+        echo '# HELP zfs_pool_health ZFS pool health state (1 for the current state).'
+        echo '# TYPE zfs_pool_health gauge'
+        chroot /hostfs /usr/sbin/zpool list -Hp -o name,size,alloc,free,frag,cap,health |
+          while read -r pool size allocated free fragmentation capacity health; do
+            capacity_ratio=$(awk -v value="$capacity" 'BEGIN { printf "%.2f", value / 100 }')
+            fragmentation_ratio=$(awk -v value="$fragmentation" 'BEGIN { printf "%.2f", value / 100 }')
+            printf 'zfs_pool_size_bytes{pool="%s"} %s\n' "$pool" "$size"
+            printf 'zfs_pool_allocated_bytes{pool="%s"} %s\n' "$pool" "$allocated"
+            printf 'zfs_pool_free_bytes{pool="%s"} %s\n' "$pool" "$free"
+            printf 'zfs_pool_capacity_ratio{pool="%s"} %s\n' "$pool" "$capacity_ratio"
+            printf 'zfs_pool_fragmentation_ratio{pool="%s"} %s\n' "$pool" "$fragmentation_ratio"
+            printf 'zfs_pool_health{pool="%s",state="%s"} 1\n' "$pool" "$health"
+          done
+      } >"$temporary"
+      mv "$temporary" "$output"
+      sleep 30
+    done
+
   config.yaml: |
     receivers:
       hostmetrics:
@@ -71,6 +107,17 @@ data:
             metrics:
               system.uptime:
                 enabled: true
+      prometheus/zfs:
+        config:
+          scrape_configs:
+            - job_name: zfs-pool
+              scrape_interval: 30s
+              static_configs:
+                - targets: [127.0.0.1:9100]
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  regex: zfs_pool_.*
+                  action: keep
 
     processors:
       memory_limiter:
@@ -104,7 +151,7 @@ data:
     service:
       pipelines:
         metrics:
-          receivers: [hostmetrics]
+          receivers: [hostmetrics, prometheus/zfs]
           processors: [memory_limiter, resource/host, transform/promote_metric_attributes, batch]
           exporters: [prometheusremotewrite/mimir]
       telemetry:
@@ -125,7 +172,7 @@ spec:
       labels:
         app: host-telemetry-agent
       annotations:
-        telemetry.rafaeltab.com/config-revision: "2"
+        telemetry.rafaeltab.com/config-revision: "3"
     spec:
       hostPID: true
       containers:
@@ -156,6 +203,58 @@ spec:
             - name: hostfs
               mountPath: /hostfs
               readOnly: true
+        - name: zpool-metrics
+          image: busybox:1.37.0
+          command: [/bin/sh, /etc/zfs-exporter/zpool-metrics.sh]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: false
+            runAsUser: 0
+            capabilities:
+              drop: [ALL]
+              add: [SYS_CHROOT]
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/zfs-exporter
+              readOnly: true
+            - name: hostfs
+              mountPath: /hostfs
+              readOnly: true
+            - name: textfile
+              mountPath: /textfile
+        - name: zfs-metrics-exporter
+          image: quay.io/prometheus/node-exporter:v1.12.1
+          args:
+            - --collector.disable-defaults
+            - --collector.textfile
+            - --collector.textfile.directory=/textfile
+            - --web.listen-address=:9100
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+          volumeMounts:
+            - name: textfile
+              mountPath: /textfile
+              readOnly: true
       volumes:
         - name: config
           configMap:
@@ -164,3 +263,5 @@ spec:
           hostPath:
             path: /
             type: Directory
+        - name: textfile
+          emptyDir: {}
