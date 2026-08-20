@@ -73,6 +73,12 @@ spec:
         limits:
           compactor_blocks_retention_period: 43800h
 
+        query_scheduler:
+          # A single Grafana dashboard can fan long-range queries out into
+          # thousands of split/sharded requests. This is a private single-user
+          # stack, so keep enough queue headroom to avoid HTTP 429 responses.
+          max_outstanding_requests_per_tenant: 16000
+
         # Single-node friendly replication settings
         ingest_storage:
           enabled: false
