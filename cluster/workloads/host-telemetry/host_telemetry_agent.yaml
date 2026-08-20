@@ -67,10 +67,6 @@ data:
               system.paging.usage:
                 enabled: true
           processes: {}
-          process:
-            mute_process_exe_error: true
-            mute_process_io_error: true
-            mute_process_user_error: true
           system:
             metrics:
               system.uptime:
