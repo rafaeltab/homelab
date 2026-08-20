@@ -124,6 +124,8 @@ spec:
     metadata:
       labels:
         app: host-telemetry-agent
+      annotations:
+        telemetry.rafaeltab.com/config-revision: "2"
     spec:
       hostPID: true
       containers:
