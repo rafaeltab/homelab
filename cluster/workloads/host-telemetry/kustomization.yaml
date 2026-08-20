@@ -1,4 +1,5 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - host_telemetry_agent.yaml
   - host_telemetry_gateway.yaml
