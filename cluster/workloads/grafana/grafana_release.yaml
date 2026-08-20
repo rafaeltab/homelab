@@ -64,6 +64,10 @@ spec:
             url: http://mimir-nginx.observability.svc.cluster.local/prometheus
             isDefault: true
             editable: false
+            jsonData:
+              # Host metrics are scraped once per minute. Grafana uses this to
+              # keep $__rate_interval wide enough for at least two samples.
+              timeInterval: 1m
           - name: Loki
             uid: loki
             type: loki
