@@ -172,7 +172,7 @@ spec:
       labels:
         app: host-telemetry-agent
       annotations:
-        telemetry.rafaeltab.com/config-revision: "3"
+        telemetry.rafaeltab.com/config-revision: "4"
     spec:
       hostPID: true
       containers:
@@ -192,7 +192,7 @@ spec:
           resources:
             requests:
               cpu: 25m
-              memory: 64Mi
+              memory: 48Mi
             limits:
               cpu: 250m
               memory: 256Mi
@@ -216,8 +216,8 @@ spec:
               add: [SYS_CHROOT]
           resources:
             requests:
-              cpu: 5m
-              memory: 8Mi
+              cpu: 1m
+              memory: 1Mi
             limits:
               cpu: 50m
               memory: 32Mi
@@ -246,8 +246,8 @@ spec:
               drop: [ALL]
           resources:
             requests:
-              cpu: 5m
-              memory: 16Mi
+              cpu: 1m
+              memory: 1Mi
             limits:
               cpu: 50m
               memory: 64Mi
