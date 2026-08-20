@@ -172,7 +172,7 @@ spec:
       labels:
         app: host-telemetry-agent
       annotations:
-        telemetry.rafaeltab.com/config-revision: "4"
+        telemetry.rafaeltab.com/config-revision: "5"
     spec:
       hostPID: true
       containers:
@@ -207,13 +207,12 @@ spec:
           image: busybox:1.37.0
           command: [/bin/sh, /etc/zfs-exporter/zpool-metrics.sh]
           securityContext:
-            allowPrivilegeEscalation: false
+            # libzfs needs host device access; the container only runs the read-only
+            # `zpool list` command against the read-only host root mount.
+            privileged: true
             readOnlyRootFilesystem: true
             runAsNonRoot: false
             runAsUser: 0
-            capabilities:
-              drop: [ALL]
-              add: [SYS_CHROOT]
           resources:
             requests:
               cpu: 1m
