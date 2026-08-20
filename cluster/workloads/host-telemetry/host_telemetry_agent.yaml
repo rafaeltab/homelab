@@ -22,18 +22,20 @@ data:
         echo '# TYPE zfs_pool_capacity_ratio gauge'
         echo '# HELP zfs_pool_fragmentation_ratio Fraction of ZFS pool space reported as fragmented.'
         echo '# TYPE zfs_pool_fragmentation_ratio gauge'
-        echo '# HELP zfs_pool_health ZFS pool health state (1 for the current state).'
+        echo '# HELP zfs_pool_health ZFS pool health (1 when ONLINE, otherwise 0).'
         echo '# TYPE zfs_pool_health gauge'
         chroot /hostfs /usr/sbin/zpool list -Hp -o name,size,alloc,free,frag,cap,health |
           while read -r pool size allocated free fragmentation capacity health; do
             capacity_ratio=$(awk -v value="$capacity" 'BEGIN { printf "%.2f", value / 100 }')
             fragmentation_ratio=$(awk -v value="$fragmentation" 'BEGIN { printf "%.2f", value / 100 }')
+            health_value=0
+            [ "$health" = ONLINE ] && health_value=1
             printf 'zfs_pool_size_bytes{pool="%s"} %s\n' "$pool" "$size"
             printf 'zfs_pool_allocated_bytes{pool="%s"} %s\n' "$pool" "$allocated"
             printf 'zfs_pool_free_bytes{pool="%s"} %s\n' "$pool" "$free"
             printf 'zfs_pool_capacity_ratio{pool="%s"} %s\n' "$pool" "$capacity_ratio"
             printf 'zfs_pool_fragmentation_ratio{pool="%s"} %s\n' "$pool" "$fragmentation_ratio"
-            printf 'zfs_pool_health{pool="%s",state="%s"} 1\n' "$pool" "$health"
+            printf 'zfs_pool_health{pool="%s",state="%s"} %s\n' "$pool" "$health" "$health_value"
           done
       } >"$temporary"
       mv "$temporary" "$output"
@@ -172,7 +174,7 @@ spec:
       labels:
         app: host-telemetry-agent
       annotations:
-        telemetry.rafaeltab.com/config-revision: "5"
+        telemetry.rafaeltab.com/config-revision: "6"
     spec:
       hostPID: true
       containers:
