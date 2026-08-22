@@ -1,13 +1,13 @@
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: livesync-homelab1-local-rafaeltab-com
+  name: livesync-homelab1-tn-rafaeltab-com
   namespace: livesync
 spec:
-  secretName: livesync-homelab1-local-rafaeltab-com-tls
+  secretName: livesync-homelab1-tn-rafaeltab-com-tls
   renewBefore: 240h
   dnsNames:
-    - "livesync.homelab1.local.rafaeltab.com"
+    - "livesync.homelab1.tn.rafaeltab.com"
   issuerRef:
     name: letsencrypt-prod
     kind: ClusterIssuer

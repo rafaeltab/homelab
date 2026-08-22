@@ -15,15 +15,15 @@ Use these immutable pins:
 | LiveSync CLI, only if a headless filesystem mirror is later required | `1.0.16-cli` | commit `693cd77576b7c30df36b5c0c8f7a564fe62e455a`; published image index `ghcr.io/vrtmrz/livesync-cli:1.0.16-cli@sha256:4d9ee24269277523ce7b05e964e1968bb1dacba0156b9034f3d227776a1259c6` | Same commit/common library as plugin `1.0.16`, plus upstream CLI-to-Obsidian E2E coverage. |
 | LiveSync Bridge, not selected | no release tag | current reviewed commit [`3a32278899f325ee1fad0ac3ba9768e8d24a9f74`](https://github.com/vrtmrz/livesync-bridge/commit/3a32278899f325ee1fad0ac3ba9768e8d24a9f74) | Uses Commonlib `0.1.17`, but is a specialized multi-peer replicator and has no immutable upstream release. |
 
-Expose the existing Traefik address through Tailscale with a **narrow subnet route for `192.168.2.46/32`**. Preserve the same URL on LAN and tailnet:
+Expose the existing Traefik HTTPS listener directly on homelab1's Tailscale address, `100.77.85.70`. Use the canonical tailnet-only URL:
 
 ```text
-https://livesync.homelab1.local.rafaeltab.com
+https://livesync.homelab1.tn.rafaeltab.com
 ```
 
-Do not install the Tailscale Kubernetes Operator for this service. Do not enable Funnel.
+The authoritative DNS record resolves that name to `100.77.85.70`. Do not install the Tailscale Kubernetes Operator, advertise a subnet route, add client host overrides, use Tailscale Serve, or enable Funnel.
 
-**No-public-exposure assertion:** the design permits access only from the private LAN and explicitly authorized tailnet identities. It creates no public `LoadBalancer`, `NodePort`, WAN port-forward, public reverse proxy/CDN path, or Tailscale Funnel. Public DNS may disclose the private RFC1918 address, as this homelab already does, but it does not provide Internet routing to the service.
+**No-public-exposure assertion:** the design permits access only from explicitly authorized tailnet identities. It creates no public `LoadBalancer`, `NodePort`, WAN port-forward, public reverse proxy/CDN path, Tailscale Serve/Funnel, or subnet route. Public DNS discloses the private Tailscale address, but non-tailnet clients cannot route to it.
 
 ## Reconciliation: CLI versus Bridge
 
@@ -51,7 +51,7 @@ Primary evidence:
 
 ## Repository and rollout precondition
 
-The local homelab checkout is one commit ahead of `origin/main`: local `b04c99cc36a6c755d0f865351b3f8db67c68f2a1` versus remote `791beab5e2071ce820665cf140ed4d90127563eb`. Flux tracks `origin/main`, so local state is not live desired state.
+Flux tracks `origin/main`; local commits and working-tree state are not live desired state until they have been reviewed, pushed, and reconciled.
 
 Before implementation:
 
@@ -75,7 +75,7 @@ cluster/
 │   ├── bootstrap-controller.yaml                # idempotent credential-aware provisioning
 │   ├── network-policies.yaml
 │   └── kustomization.yaml
-├── workloads/certificates/livesync_homelab1_local_rafaeltab_com.yaml
+├── workloads/certificates/livesync_homelab1_tn_rafaeltab_com.yaml
 └── flux/kustomizations/00N_livesync.yaml
 ```
 
@@ -110,10 +110,10 @@ Obsidian vault (plaintext)
   │  plugin 1.0.16: encrypt content + properties on device
   │  HTTPS, authenticated as dedicated database member
   ▼
-LAN client ───────────────┐
-                          ├─> Traefik :443 ─> ClusterIP :5984 ─> CouchDB PVC
-Tailnet client             │       TLS boundary       namespace boundary
-  └─ Tailscale tunnel ─> /32 subnet router ┘
+Tailnet client
+  └─ Tailscale tunnel ─> homelab1 100.77.85.70:443
+                              └─> Traefik :443 ─> ClusterIP :5984 ─> CouchDB PVC
+                                      TLS boundary       namespace boundary
                                                 │
                                                 ├─ local ZFS snapshots
                                                 └─ encrypted off-node backup
@@ -125,12 +125,12 @@ Password manager ─> E2EE passphrase ─> user devices only (never the server)
 Trust boundaries:
 
 1. **Device boundary:** vault plaintext, local PouchDB, CouchDB member credential, and E2EE passphrase exist on each approved device. A compromised device can read and alter the vault.
-2. **Tailnet/LAN boundary:** Tailscale and private routing restrict reachability but do not replace CouchDB authentication or TLS. LAN peers are not implicitly trusted.
+2. **Tailnet boundary:** direct Tailscale addressing and grants restrict reachability but do not replace CouchDB authentication or TLS. LAN peers have no separate route to this hostname.
 3. **Traefik boundary:** Traefik terminates public-CA TLS and forwards HTTP only inside the cluster. It must not log `Authorization`, Setup URIs, or request bodies.
 4. **Namespace boundary:** NetworkPolicies permit only Traefik and the dedicated bootstrap controller to reach CouchDB. The Service is `ClusterIP` only.
 5. **Cluster-admin boundary:** Kubernetes/Flux/SOPS administrators can obtain CouchDB credentials and manipulate the workload. They cannot decrypt E2EE note contents without the separately held passphrase, but metadata leakage depends on the selected property obfuscation.
 6. **Storage/backup boundary:** the PVC contains encrypted LiveSync document content when E2EE is enabled, plus CouchDB operational metadata and credentials/configuration. Backups retain all server-side material and must be encrypted off-node.
-7. **Tailscale control-plane boundary:** tailnet administrators can change route approval and grants. Default subnet-router SNAT means Traefik normally sees the router's LAN identity, not the originating user; authorization remains at Tailscale policy plus CouchDB credentials.
+7. **Tailscale control-plane boundary:** tailnet administrators can change node access and grants. Clients connect directly to homelab1's Tailscale IP; authorization remains layered between Tailscale policy and CouchDB credentials.
 
 ## Identities and authorization
 
@@ -139,7 +139,7 @@ Trust boundaries:
 | `couchdb-admin` | Server admin, bootstrap, upgrade, restore | SOPS-encrypted namespaced Secret; mounted only into CouchDB and the bootstrap controller | Never in plugin clients, Setup URIs, screenshots, logs, or routine synchronization |
 | `livesync` | Named member of exactly one vault database | SOPS Secret for provisioning; distributed to approved clients through a short-lived Setup URI | No `_admin` role, cluster config, database creation/deletion, `_security` changes, or access to other databases |
 | Traefik service account | Read routing resources and proxy TCP/HTTP | Existing cluster-managed identity | No CouchDB credential |
-| Tailnet user/device | Reach `192.168.2.46:443` only when allowed by policy | Tailscale control plane/device keys | No route to `5984`, SSH, port 80, adjacent LAN hosts, or the full `/24` |
+| Tailnet user/device | Reach `100.77.85.70:443` only when allowed by policy | Tailscale control plane/device keys | No access to `5984`, SSH, port 80, other node services, or LAN subnets |
 | Flux controllers | Reconcile Git and decrypt SOPS resources | Existing Flux/GPG setup | No E2EE passphrase |
 | Device user | Decrypt and edit vault | Device plus password manager | No CouchDB admin credential |
 
@@ -209,32 +209,22 @@ Primary sources:
 
 ### TLS and ingress
 
-- Create a cert-manager `Certificate` for `livesync.homelab1.local.rafaeltab.com` through the existing DNS01 `letsencrypt-prod` issuer.
+- Create a cert-manager `Certificate` for `livesync.homelab1.tn.rafaeltab.com` through the existing DNS01 `letsencrypt-prod` issuer.
 - Create only a Traefik `websecure` Ingress, with TLS required and no port-80 router for this hostname.
 - Use a `ClusterIP` CouchDB Service on port `5984`; never use `NodePort` or `LoadBalancer` for CouchDB.
-- Preserve the URL, Host header, and SNI through the Tailscale path, so the same trusted certificate works on LAN and tailnet.
+- Preserve the URL, Host header, and SNI over the direct Tailscale path so Traefik selects the trusted certificate.
 - Configure Traefik access logs to redact `Authorization`, cookies, Setup URI material, and bodies. Set conservative request/idle timeouts that still pass LiveSync attachment and long-poll `_changes` tests.
 
 ### Selected Tailscale method
 
-Install Tailscale on an always-on LAN node and advertise only:
+Use the Tailscale daemon already running on homelab1. The authoritative `A` record for `livesync.homelab1.tn.rafaeltab.com` is `100.77.85.70`, and clients connect directly to that node address on TCP `443`. Verify that Traefik's existing HTTPS listener accepts traffic arriving on the Tailscale interface before rollout.
 
-```text
-192.168.2.46/32
-```
+Tailnet policy must grant only the intended user/device group TCP `443` to `100.77.85.70`, with policy tests for both allow and deny cases. Do not advertise a LAN subnet or host route, do not add client `/etc/hosts` overrides, and do not use Tailscale Serve, Funnel, or the Kubernetes Operator. The A record was created manually and remains untouched until the dedicated ExternalDNS change explicitly opts this Ingress into dry-run/create-only TXT ownership adoption. ExternalDNS may later manage additions and updates under `upsert-only`, but it must never delete the record; deletion remains a human-only operation.
 
-Prefer the k3s host only after proving it can route tailnet traffic to its own LAN address. Otherwise use another always-on LAN node. Do not advertise `192.168.2.0/24`, a default route, or exit-node routes.
-
-Authorize the subnet router under a dedicated tag such as `tag:homelab-subnet-router`. Route approval and data-plane grants are separate controls. Tailnet policy must grant the intended user/device group only TCP `443` to `192.168.2.46`, with policy tests for both allow and deny cases. Tailscale subnet routers use SNAT by default; keep it enabled unless the LAN has an explicit return route and there is a tested need for original source addresses.
-
-If the existing authoritative DNS record resolves the FQDN to `192.168.2.46`, tailnet clients can use it unchanged. Otherwise configure restricted split DNS for `homelab1.local.rafaeltab.com`. MagicDNS does not synthesize this custom application name.
-
-The Kubernetes Operator is not selected because it adds CRDs, a controller, OAuth credentials, per-service proxy resources, a second ingress path, and a `.ts.net` identity without removing the existing Traefik path. Revisit it only as a separate architecture decision.
+The Kubernetes Operator remains rejected because it adds CRDs, a controller, OAuth credentials, per-service proxy resources, and a second ingress path. Tailscale Serve remains rejected because Traefik is the sole TLS ingress and certificate owner. Funnel remains rejected because it would make the endpoint Internet-public.
 
 Primary sources:
 
-- [Tailscale subnet routers](https://tailscale.com/docs/features/subnet-routers)
-- [Subnet-router setup](https://tailscale.com/docs/features/subnet-routers/how-to/setup)
 - [Tailnet policy syntax, including `autoApprovers`](https://tailscale.com/docs/reference/syntax/policy-file)
 - [Tailscale grants](https://tailscale.com/docs/features/access-control/grants)
 - [DNS in Tailscale](https://tailscale.com/docs/reference/dns-in-tailscale)
@@ -300,20 +290,20 @@ Sources:
 ### TLS and Tailscale
 
 - cert-manager owns TLS private-key creation and renewal in a namespaced Secret. Alert before expiry and verify automatic renewal.
-- Use a tagged Tailscale node auth key only for initial router enrollment; make it reusable only if operationally necessary, preauthorized only when policy allows, and ephemeral only if the node is genuinely disposable.
-- Expire/revoke the enrollment key after use. Device/node keys then follow Tailscale rotation. Remove route approval and grants before decommissioning the router.
+- homelab1's existing Tailscale node identity owns `100.77.85.70`; do not introduce an application-specific auth key or proxy identity.
+- Device/node keys follow Tailscale rotation. Remove the LiveSync grant before decommissioning the endpoint, then produce a verified human deletion request for any stale DNS record; automation must not delete it.
 
 ## Threat model
 
 | Threat | Impact | Controls | Residual risk / detection |
 | --- | --- | --- | --- |
-| Public Internet exposure | Credential attacks and vault tampering | Private RFC1918 address; `/32` subnet route; no Funnel, public LB, NodePort, or WAN forward; authenticated CouchDB | Public DNS leaks hostname/private IP. Continuously inventory Services, Ingresses, router forwards, and Tailscale policy. |
+| Public Internet exposure | Credential attacks and vault tampering | Direct private Tailscale address; no Serve, Funnel, public LB, NodePort, or WAN forward; authenticated CouchDB | Public DNS leaks hostname/Tailscale IP. Continuously inventory Services, Ingresses, router forwards, DNS ownership, and Tailscale policy. |
 | Stolen CouchDB member credential | Read/write encrypted documents; deletion or conflict injection | One-database member; E2EE; path/property obfuscation; 90-day rotation; device revocation | Attacker can destroy or corrupt remote state. Backups, CouchDB logs, and changes monitoring are required. |
 | Stolen CouchDB admin credential | Full database/configuration takeover | SOPS, least mounting, no client distribution, 180-day rotation, audit tests | Cluster admins can still retrieve it. Rotate after any cluster/SOPS compromise. |
 | Compromised Obsidian device | Plaintext vault disclosure and valid writes | Device encryption/lock, plugin pin, tailnet/device revocation, credential rotation | E2EE cannot protect plaintext on an authorized endpoint. |
-| Malicious LAN peer | Probe/replay/credential attack | TLS, CouchDB auth, exact CORS, no direct `5984`, Traefik-only NetworkPolicy | CORS does not block non-browser clients. Detect authentication failures and rate anomalies. |
+| Malicious network peer | Probe/replay/credential attack | Tailnet grant, TLS, CouchDB auth, exact CORS, no direct `5984`, Traefik-only NetworkPolicy | CORS does not block non-browser clients. Detect authentication failures and rate anomalies. |
 | Compromised pod in cluster | Direct CouchDB access or secret theft | Namespace isolation, default-deny policies, Secret least exposure, hardened pod security | Cluster-admin or node compromise bypasses these controls. |
-| Misconfigured Tailscale route/grant | Broader LAN reachability | Advertise `/32`; grant only TCP 443; policy tests; no SNAT disablement | Tailnet admin can broaden policy. Audit policy/device changes. |
+| Misconfigured Tailscale grant | Broader node reachability | Grant only `100.77.85.70:443`; no subnet route, Serve, or Funnel; policy tests | Tailnet admin can broaden policy. Audit policy/device changes. |
 | Unencrypted metadata leakage | Sensitive note titles/path disclosure in DB/backups | Enable E2EE and path/property obfuscation before first sync | Sizes, timing, account names, and operational metadata can remain visible. |
 | Concurrent edits/conflicts | Silent overwrite or duplicated/deleted content | Keep beta newer-file auto-resolution off; use LiveSync inspection; preserve revisions; test conflict cases | Automatic simple merges can still be wrong semantically. Human review remains necessary. |
 | Disk/node loss or corruption | Vault outage or permanent loss | ZFS snapshots, encrypted off-node copies, quarterly isolated restore | Single-node service has downtime until restore; target RTO is 4 hours. |
@@ -373,11 +363,11 @@ CouchDB explicitly supports replication, file copy of append-only database files
 6. Connect two disposable vaults and run the full compatibility matrix.
 7. Take the first known-good off-node backup and restore it in isolation.
 8. Only then connect the production vault.
-9. Enroll/approve the `/32` Tailscale subnet route and run remote-access tests last.
+9. Verify direct tailnet DNS, TCP `443`, and grant behavior against `100.77.85.70`; run remote-access tests last.
 
 ### Rollback
 
-- **Pre-client infrastructure failure:** revert the Flux commit, retain the PVC, certificate, and SOPS Secret, and remove route approval. Do not delete data automatically.
+- **Pre-client infrastructure failure:** revert the Flux commit, retain the PVC, certificate, and SOPS Secret, and remove the LiveSync tailnet grant. Whether the DNS record is still manual or has acquired ExternalDNS TXT ownership, leave it intact and submit any deletion request to the human operator. Do not delete DNS or data automatically.
 - **Bad configuration:** restore the prior ConfigMap/Secret revision, restart the same pinned image, and rerun auth/CORS tests.
 - **Bad image upgrade:** stop clients, stop CouchDB, restore the pre-upgrade ZFS snapshot, and run the previous image digest. Do not run an older CouchDB binary against a data directory already migrated by a newer release unless CouchDB release notes explicitly permit it.
 - **Bad plugin upgrade:** stop synchronization, preserve every device vault and server backup, restore the previously verified plugin on disposable clients first, and follow upstream database compatibility guidance. Never mass-downgrade all clients against production without the test.
@@ -401,10 +391,10 @@ All tests are release gates. Replace placeholders without printing secrets into 
 | AUTH-3 | As `livesync`, attempt database create/delete, `/_node/.../_config`, and `PUT <db>/_security` | Returns `401/403`; no state changes. |
 | AUTH-4 | Create a second ordinary user and read the vault DB | Returns `401/403`. Delete the test user afterward. |
 | AUTH-5 | Search rendered manifests, pod specs, logs, and Traefik logs for known credential canaries | No literal admin/member password, Setup URI, or Authorization header appears. SOPS ciphertext is the only Git representation. |
-| CORS-1 | Send preflight from `app://obsidian.md` requesting `PUT` and `authorization,content-type` | Matching `Access-Control-Allow-Origin`, credentials `true`, and required methods/headers. |
+| CORS-1 | Send preflight to `https://livesync.homelab1.tn.rafaeltab.com` from `app://obsidian.md`, requesting `PUT` and `authorization,content-type` | Matching `Access-Control-Allow-Origin`, credentials `true`, and required methods/headers. |
 | CORS-2 | Repeat for `capacitor://localhost` and `http://localhost` | Each explicitly allowed origin succeeds. |
 | CORS-3 | Preflight from `https://evil.example` | No `Access-Control-Allow-Origin`; no response contains wildcard ACAO. |
-| TLS-1 | `openssl s_client -connect 192.168.2.46:443 -servername livesync.homelab1.local.rafaeltab.com` | Trusted chain, correct SAN, currently valid certificate, TLS 1.2+; no hostname mismatch. |
+| TLS-1 | `openssl s_client -connect 100.77.85.70:443 -servername livesync.homelab1.tn.rafaeltab.com` | Trusted chain, correct SAN, currently valid certificate, TLS 1.2+; no hostname mismatch. |
 | TLS-2 | Plain HTTP request for the LiveSync hostname | No application route on port 80; connection fails or a global redirect exposes no data. HTTPS remains mandatory. |
 | PLUG-1 | On two Obsidian `>=1.7.2` clients with plugin `1.0.16`, create, update, rename, and delete a Markdown note | Both vaults converge after each operation. |
 | PLUG-2 | Synchronize a binary attachment larger than one chunk | Byte-for-byte hashes match on both clients. |
@@ -414,12 +404,12 @@ All tests are release gates. Replace placeholders without printing secrets into 
 | CLI-1 | Only if CLI is introduced: run the pinned `1.0.16-cli` image against a disposable DB and vault | CLI and plugin exchange create/update/rename/delete operations and encrypted, obfuscated content. |
 | BKP-1 | Verify newest local snapshot and encrypted off-node copy age | Both meet the 24-hour RPO; off-node copy is on a different physical host. |
 | BKP-2 | Perform the isolated restore drill described above | Auth, security object, counts, attachments, changes feed, decryption, and two-client sync pass within 4 hours. |
-| TS-1 | Inspect tailnet routes | Exactly `192.168.2.46/32` is advertised/approved by the intended tagged router; no `/24`, default, or exit route. |
-| TS-2 | From an authorized off-LAN tailnet client, resolve and access the FQDN on TCP 443 | DNS returns `192.168.2.46`; TLS and CouchDB auth pass. |
-| TS-3 | From the authorized client, probe TCP 80, 5984, SSH, another LAN host, and adjacent addresses | All fail. Only `192.168.2.46:443` is reachable under the grant. |
+| TS-1 | Inspect homelab1 and tailnet routes | homelab1 owns `100.77.85.70`; no LiveSync subnet route, Serve, Funnel, or client host override exists. |
+| TS-2 | From an authorized tailnet client, resolve and access the FQDN on TCP 443 | DNS returns only `100.77.85.70`; TLS and CouchDB auth pass through Traefik. |
+| TS-3 | From the authorized client, probe TCP 80, 5984, SSH, another node service, and LAN addresses | All disallowed targets fail. Only `100.77.85.70:443` is granted for LiveSync. |
 | TS-4 | From an unauthorized tailnet identity/device, probe TCP 443 | Fails; policy tests also assert the deny. |
-| TS-5 | Stop the subnet router | Off-LAN access fails closed; LAN access through the same FQDN and certificate remains healthy. Reboot restores only the `/32` route. |
-| PUB-1 | Inspect Kubernetes Services/Ingresses, Tailscale policy/devices, edge-router forwarding, and external connectivity | No public LB, NodePort, WAN forward, CDN/proxy, Operator proxy, or Funnel. A non-tailnet Internet client cannot connect. |
+| TS-5 | Stop Tailscale on homelab1 | The endpoint fails closed without falling back to LAN, Serve, Funnel, or a subnet route; restarting Tailscale restores direct access to `100.77.85.70:443`. |
+| PUB-1 | Inspect Kubernetes Services/Ingresses, Tailscale policy/devices, routes, Serve status, edge-router forwarding, and external connectivity | No public LB, NodePort, WAN forward, CDN/proxy, Operator proxy, Serve, Funnel, or subnet route. A non-tailnet Internet client cannot connect. |
 
 ## Implementation gate
 
@@ -428,7 +418,7 @@ Implementation may start only when the operator confirms:
 - the existing local-only Git commit has been reviewed and pushed or otherwise reconciled;
 - the exact production vault database name;
 - the off-node backup destination exists and has enough retained capacity;
-- the Tailscale subnet-router host and intended tailnet user/device identities are known;
+- homelab1's direct Tailscale address and intended tailnet user/device identities are confirmed;
 - the tailnet policy change has explicit deny tests;
 - E2EE and Path Obfuscation are accepted as first-sync invariants.
 
