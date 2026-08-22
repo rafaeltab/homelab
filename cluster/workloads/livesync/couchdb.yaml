@@ -58,7 +58,7 @@ spec:
   replicas: 1
   podManagementPolicy: OrderedReady
   updateStrategy:
-    type: OnDelete
+    type: RollingUpdate
   selector:
     matchLabels:
       app.kubernetes.io/name: couchdb
@@ -82,6 +82,38 @@ spec:
         - name: couchdb
           image: docker.io/library/couchdb:3.5.2.1@sha256:b80216f643e99d31df318c740dbc556ac08b56444030ed1d5e6d7b0d4e625213
           imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              credential_hash() {
+                sha256sum /run/secrets/couchdb-admin/username /run/secrets/couchdb-admin/password
+              }
+
+              initial_hash="$(credential_hash)"
+              # docker.ini is pod-scoped runtime state. Recreate it on every
+              # container start so a projected administrator rotation replaces
+              # the old admin instead of leaving the previous hash active.
+              rm -f /opt/couchdb/etc/local.d/docker.ini
+              /docker-entrypoint.sh /opt/couchdb/bin/couchdb &
+              couchdb_pid=$!
+
+              terminate() {
+                kill -TERM "$couchdb_pid" 2>/dev/null || true
+                wait "$couchdb_pid" 2>/dev/null || true
+              }
+              trap terminate TERM INT
+
+              while kill -0 "$couchdb_pid" 2>/dev/null; do
+                sleep 10
+                if [ "$(credential_hash)" != "$initial_hash" ]; then
+                  echo "CouchDB administrator Secret changed; restarting with the projected credentials."
+                  terminate
+                  exit 0
+                fi
+              done
+              wait "$couchdb_pid"
           env:
             - name: COUCHDB_USER
               valueFrom:
@@ -148,6 +180,9 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            - name: admin-credentials
+              mountPath: /run/secrets/couchdb-admin
+              readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -161,6 +196,9 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 32Mi
+        - name: admin-credentials
+          secret:
+            secretName: couchdb-admin-credentials
 ---
 apiVersion: v1
 kind: Service

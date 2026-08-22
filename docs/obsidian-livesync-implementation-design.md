@@ -72,19 +72,20 @@ cluster/
 ├── workloads/livesync/
 │   ├── couchdb.yaml                             # ConfigMap, PVC, StatefulSet, Service
 │   ├── ingress.yaml                             # Traefik HTTPS only
-│   ├── bootstrap-job.yaml                       # idempotent admin-only provisioning
+│   ├── bootstrap-controller.yaml                # idempotent credential-aware provisioning
 │   ├── network-policies.yaml
 │   └── kustomization.yaml
 ├── workloads/certificates/livesync_homelab1_local_rafaeltab_com.yaml
 └── flux/kustomizations/00N_livesync.yaml
 ```
 
-The Flux Kustomization depends on namespaces, secrets, OpenEBS/storage, and certificates. Set `prune: true`, health checks for the StatefulSet and bootstrap Job, and a bounded reconciliation timeout.
+The Flux Kustomization depends on namespaces, secrets, OpenEBS/storage, and certificates. Set `prune: true`, health checks for the StatefulSet and bootstrap controller Deployment, and a bounded reconciliation timeout.
 
 ### Workload
 
 - One-replica `StatefulSet`, because this is a single-node CouchDB deployment with one persistent identity.
-- `updateStrategy: OnDelete` or an explicitly gated rolling change; never allow an unattended image-tag move.
+- Use `updateStrategy: RollingUpdate`; the image remains pinned by tag and digest, so declarative pod-template fixes roll out automatically without introducing tag drift.
+- Mount the administrator Secret as a projected volume in addition to the entrypoint environment. A small PID 1 wrapper terminates CouchDB when that projection changes, causing Kubernetes to restart it with refreshed environment values.
 - `podManagementPolicy: OrderedReady`.
 - Container image by tag **and** OCI index digest shown above; `imagePullPolicy: IfNotPresent` is safe because the digest is immutable.
 - Run with the official image's non-root `couchdb` identity. Set `runAsNonRoot`, drop all capabilities, disable privilege escalation, use the RuntimeDefault seccomp profile, and make the root filesystem read-only only after verifying the image's required writable paths are separately mounted.
@@ -126,7 +127,7 @@ Trust boundaries:
 1. **Device boundary:** vault plaintext, local PouchDB, CouchDB member credential, and E2EE passphrase exist on each approved device. A compromised device can read and alter the vault.
 2. **Tailnet/LAN boundary:** Tailscale and private routing restrict reachability but do not replace CouchDB authentication or TLS. LAN peers are not implicitly trusted.
 3. **Traefik boundary:** Traefik terminates public-CA TLS and forwards HTTP only inside the cluster. It must not log `Authorization`, Setup URIs, or request bodies.
-4. **Namespace boundary:** NetworkPolicies permit only Traefik and the one-shot bootstrap path to CouchDB. The Service is `ClusterIP` only.
+4. **Namespace boundary:** NetworkPolicies permit only Traefik and the dedicated bootstrap controller to reach CouchDB. The Service is `ClusterIP` only.
 5. **Cluster-admin boundary:** Kubernetes/Flux/SOPS administrators can obtain CouchDB credentials and manipulate the workload. They cannot decrypt E2EE note contents without the separately held passphrase, but metadata leakage depends on the selected property obfuscation.
 6. **Storage/backup boundary:** the PVC contains encrypted LiveSync document content when E2EE is enabled, plus CouchDB operational metadata and credentials/configuration. Backups retain all server-side material and must be encrypted off-node.
 7. **Tailscale control-plane boundary:** tailnet administrators can change route approval and grants. Default subnet-router SNAT means Traefik normally sees the router's LAN identity, not the originating user; authorization remains at Tailscale policy plus CouchDB credentials.
@@ -135,7 +136,7 @@ Trust boundaries:
 
 | Identity | Scope | Stored in | Prohibited use |
 | --- | --- | --- | --- |
-| `couchdb-admin` | Server admin, bootstrap, upgrade, restore | SOPS-encrypted namespaced Secret; mounted only into CouchDB and bootstrap Job | Never in plugin clients, Setup URIs, screenshots, logs, or routine synchronization |
+| `couchdb-admin` | Server admin, bootstrap, upgrade, restore | SOPS-encrypted namespaced Secret; mounted only into CouchDB and the bootstrap controller | Never in plugin clients, Setup URIs, screenshots, logs, or routine synchronization |
 | `livesync` | Named member of exactly one vault database | SOPS Secret for provisioning; distributed to approved clients through a short-lived Setup URI | No `_admin` role, cluster config, database creation/deletion, `_security` changes, or access to other databases |
 | Traefik service account | Read routing resources and proxy TCP/HTTP | Existing cluster-managed identity | No CouchDB credential |
 | Tailnet user/device | Reach `192.168.2.46:443` only when allowed by policy | Tailscale control plane/device keys | No route to `5984`, SSH, port 80, adjacent LAN hosts, or the full `/24` |
@@ -155,7 +156,7 @@ A normal database member can read/write ordinary documents but cannot change des
 
 ## CouchDB bootstrap and configuration
 
-Perform one idempotent, reviewed bootstrap Job using the pinned plugin repository's provisioning behavior as evidence; do not pipe mutable `main` into a shell.
+Run one idempotent bootstrap controller replica using the pinned plugin repository's provisioning behavior as evidence; do not pipe mutable `main` into a shell. The controller becomes Ready only after a successful reconciliation, periodically repairs database and authorization drift, and watches projected administrator and member credentials. A projection change restarts it with freshly injected environment values, so script/spec updates roll through the Deployment and credential rotations do not depend on a manually versioned Job name.
 
 Required state:
 
@@ -191,7 +192,7 @@ Bootstrap sequence:
 6. Create/update the non-admin `livesync` user.
 7. Apply the member-only `_security` object.
 8. Run positive and negative authorization tests.
-9. Mark the Job complete without embedding credentials in logs or annotations.
+9. Mark the controller Ready, then repeat reconciliation periodically and immediately after projected credentials change, without embedding credentials in logs or annotations.
 
 Primary sources:
 
@@ -245,7 +246,7 @@ Primary sources:
 Apply a namespace-wide default deny for both ingress and egress, then add only:
 
 1. Ingress to CouchDB TCP `5984` from the actual Traefik pods in `kube-system`.
-2. Ingress to CouchDB TCP `5984` from the labeled bootstrap Job.
+2. Ingress to CouchDB TCP `5984` from the labeled bootstrap controller.
 3. DNS egress TCP/UDP `53` to the actual kube-dns/CoreDNS pods for pods that resolve the CouchDB Service.
 4. Bootstrap egress to CouchDB TCP `5984`.
 
@@ -278,9 +279,9 @@ Sources:
 ### CouchDB administrator
 
 - Generate at least 32 random bytes; store only in the SOPS-encrypted `livesync` Secret.
-- Mount or reference it only in CouchDB and the bootstrap/restore jobs.
+- Mount or reference it only in CouchDB, the bootstrap controller, and restore jobs.
 - Rotate every 180 days and immediately after suspected exposure.
-- Rotation order: create replacement admin state, restart CouchDB with the replacement, verify authenticated health/bootstrap operations, update SOPS desired state, then invalidate the old credential. Never leave two permanent admins for convenience.
+- Rotation order: commit the SOPS-encrypted replacement, let the projected-volume watcher restart CouchDB and the bootstrap controller, verify authenticated health/bootstrap operations, and verify the old credential fails. Revert the encrypted Git change if reconciliation fails; never leave two permanent admins for convenience.
 
 ### LiveSync database member
 
@@ -365,7 +366,7 @@ CouchDB explicitly supports replication, file copy of append-only database files
 ### Rollout
 
 1. Reconcile local Git with `origin/main` and review the pre-existing local commit.
-2. Create namespace, encrypted secrets, certificate, ConfigMap, PVC, StatefulSet, ClusterIP Service, NetworkPolicies, bootstrap Job, and HTTPS Ingress.
+2. Create namespace, encrypted secrets, certificate, ConfigMap, PVC, StatefulSet, ClusterIP Service, NetworkPolicies, bootstrap controller, and HTTPS Ingress.
 3. Render with `kubectl kustomize cluster`; run schema validation and policy checks.
 4. Push one reviewed commit and wait for Flux readiness.
 5. Run infrastructure/security acceptance tests before any real vault connects.
@@ -391,7 +392,7 @@ All tests are release gates. Replace placeholders without printing secrets into 
 | --- | --- | --- |
 | GIT-1 | `git status --short --branch`; compare `HEAD`, `origin/main`, and Flux source revision | Implementation commit is pushed, reviewed, and exactly reconciled by Flux. |
 | IMG-1 | `kubectl -n livesync get pod -l app=couchdb -o jsonpath='{.items[0].status.containerStatuses[0].imageID}'` | Runtime image ID resolves to the pinned index or amd64 child digest, never a mutable-only tag. |
-| K8S-1 | `kubectl -n livesync get svc,ingress,pvc,statefulset,job,networkpolicy` | One ClusterIP service, one TLS Ingress, retained RWO PVC, ready StatefulSet/bootstrap, and expected policies. No NodePort/LoadBalancer. |
+| K8S-1 | `kubectl -n livesync get svc,ingress,pvc,statefulset,deployment,networkpolicy` | One ClusterIP service, one TLS Ingress, retained RWO PVC, ready StatefulSet/bootstrap controller, and expected policies. No NodePort/LoadBalancer. |
 | K8S-2 | Restart/delete the CouchDB pod, then read a test note and attachment | Pod returns Ready and persisted data is unchanged. |
 | NET-1 | From a Traefik pod, connect to `couchdb.livesync.svc:5984`; from an unselected pod in `livesync`, repeat | Traefik succeeds; unselected pod times out/fails. This proves policy enforcement. |
 | NET-2 | From CouchDB pod, attempt arbitrary Internet TCP/443 | Fails; CouchDB has no general egress. |

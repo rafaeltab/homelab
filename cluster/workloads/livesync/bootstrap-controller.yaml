@@ -1,20 +1,22 @@
-apiVersion: batch/v1
-kind: Job
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  # Bump the version when bootstrap logic or either credential is rotated so
-  # Flux creates a fresh, idempotent reconciliation Job.
-  name: livesync-bootstrap-v1
+  name: livesync-bootstrap
   namespace: livesync
 spec:
-  backoffLimit: 4
-  activeDeadlineSeconds: 600
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: livesync-bootstrap
+      app.kubernetes.io/part-of: livesync
   template:
     metadata:
       labels:
         app.kubernetes.io/name: livesync-bootstrap
         app.kubernetes.io/part-of: livesync
     spec:
-      restartPolicy: OnFailure
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -52,13 +54,20 @@ spec:
             - -ec
           args:
             - |
+              credential_hash() {
+                sha256sum /run/credentials/admin/* /run/credentials/member/*
+              }
+              while true; do
+              rm -f /tmp/bootstrap-ready
+              initial_credential_hash="$(credential_hash)"
+
               base_url=http://couchdb:5984
               database=livesync
               admin_auth="${ADMIN_USERNAME}:${ADMIN_PASSWORD}"
               member_auth="${MEMBER_USERNAME}:${MEMBER_PASSWORD}"
 
               status() {
-                curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$@"
+                curl --connect-timeout 5 --max-time 30 --silent --show-error --output /dev/null --write-out '%{http_code}' "$@"
               }
               require_status() {
                 expected="$1"
@@ -75,7 +84,7 @@ spec:
 
               ready=false
               for attempt in $(seq 1 60); do
-                if curl --fail --silent --show-error --user "$admin_auth" "$base_url/_up" >/dev/null; then
+                if curl --connect-timeout 5 --max-time 30 --fail --silent --show-error --user "$admin_auth" "$base_url/_up" >/dev/null; then
                   ready=true
                   break
                 fi
@@ -84,7 +93,7 @@ spec:
               [ "$ready" = true ] || { echo "CouchDB did not become ready" >&2; exit 1; }
 
               echo "Verifying single-node CouchDB state."
-              cluster_state="$(curl --fail --silent --show-error --user "$admin_auth" "$base_url/_cluster_setup")"
+              cluster_state="$(curl --connect-timeout 5 --max-time 30 --fail --silent --show-error --user "$admin_auth" "$base_url/_cluster_setup")"
               echo "$cluster_state" | grep -Eq '"state":"(single_node_enabled|cluster_finished)"' || {
                 echo "CouchDB single-node setup is incomplete" >&2
                 exit 1
@@ -94,7 +103,7 @@ spec:
               require_status '201,202,412' --user "$admin_auth" --request PUT "$base_url/$database"
 
               echo "Verifying the LiveSync database version."
-              version_doc="$(curl --silent --show-error --user "$admin_auth" --write-out '\n%{http_code}' "$base_url/$database/obsydian_livesync_version")"
+              version_doc="$(curl --connect-timeout 5 --max-time 30 --silent --show-error --user "$admin_auth" --write-out '\n%{http_code}' "$base_url/$database/obsydian_livesync_version")"
               version_status="$(printf '%s\n' "$version_doc" | tail -n 1)"
               version_body="$(printf '%s\n' "$version_doc" | sed '$d')"
               if [ "$version_status" = 404 ]; then
@@ -115,26 +124,35 @@ spec:
               member_password_json="$(json_escape "$MEMBER_PASSWORD")"
               user_status="$(status --user "$admin_auth" "$user_path")"
               user_rev=''
+              member_changed=true
               if [ "$user_status" = 200 ]; then
-                user_rev="$(curl --fail --silent --show-error --user "$admin_auth" "$user_path" | sed -n 's/.*"_rev":"\([^"]*\)".*/\1/p')"
+                user_rev="$(curl --connect-timeout 5 --max-time 30 --fail --silent --show-error --user "$admin_auth" "$user_path" | sed -n 's/.*"_rev":"\([^"]*\)".*/\1/p')"
                 [ -n "$user_rev" ] || { echo "existing member revision is missing" >&2; exit 1; }
+                if [ "$(status --user "$member_auth" "$base_url/$database")" = 200 ]; then
+                  member_changed=false
+                fi
               elif [ "$user_status" != 404 ]; then
                 echo "member lookup failed with HTTP $user_status" >&2
                 exit 1
               fi
 
-              if [ -n "$user_rev" ]; then
-                member_document="$(printf '{"_rev":"%s","name":"%s","password":"%s","roles":[],"type":"user"}' "$user_rev" "$member_username_json" "$member_password_json")"
-              else
-                member_document="$(printf '{"name":"%s","password":"%s","roles":[],"type":"user"}' "$member_username_json" "$member_password_json")"
+              if [ "$member_changed" = true ]; then
+                if [ -n "$user_rev" ]; then
+                  member_document="$(printf '{"_rev":"%s","name":"%s","password":"%s","roles":[],"type":"user"}' "$user_rev" "$member_username_json" "$member_password_json")"
+                else
+                  member_document="$(printf '{"name":"%s","password":"%s","roles":[],"type":"user"}' "$member_username_json" "$member_password_json")"
+                fi
+                require_status '201,202' --user "$admin_auth" --header 'Content-Type: application/json' --request PUT \
+                  --data "$member_document" "$user_path"
               fi
-              require_status '201,202' --user "$admin_auth" --header 'Content-Type: application/json' --request PUT \
-                --data "$member_document" "$user_path"
 
               echo "Applying member-only database security."
               security_document="$(printf '{"admins":{"names":[],"roles":[]},"members":{"names":["%s"],"roles":[]}}' "$member_username_json")"
-              require_status '200,201,202' --user "$admin_auth" --header 'Content-Type: application/json' --request PUT \
-                --data "$security_document" "$base_url/$database/_security"
+              current_security="$(curl --connect-timeout 5 --max-time 30 --fail --silent --show-error --user "$admin_auth" "$base_url/$database/_security")"
+              if [ "$current_security" != "$security_document" ]; then
+                require_status '200,201,202' --user "$admin_auth" --header 'Content-Type: application/json' --request PUT \
+                  --data "$security_document" "$base_url/$database/_security"
+              fi
 
               echo "Running positive and negative authorization checks."
               echo "Checking member database access."
@@ -144,19 +162,31 @@ spec:
               echo "Checking routine credential isolation from the authentication database."
               require_status '401,403' --user "$member_auth" "$base_url/_users"
 
-              echo "Checking member document write and delete access."
-              test_document=livesync_bootstrap_authorization_test
-              test_status="$(status --user "$member_auth" --header 'Content-Type: application/json' --request PUT \
-                --data '{"type":"bootstrap-test"}' "$base_url/$database/$test_document")"
-              case "$test_status" in
-                201|202|409) ;;
-                *) echo "member write test failed with HTTP $test_status" >&2; exit 1 ;;
-              esac
-              test_rev="$(curl --fail --silent --show-error --user "$member_auth" "$base_url/$database/$test_document" | sed -n 's/.*"_rev":"\([^"]*\)".*/\1/p')"
-              [ -n "$test_rev" ] || { echo "member write test revision is missing" >&2; exit 1; }
-              require_status '200,202' --user "$member_auth" --request DELETE "$base_url/$database/$test_document?rev=$test_rev"
+              if [ "$member_changed" = true ]; then
+                echo "Checking member document write and delete access after credential reconciliation."
+                test_document=livesync_bootstrap_authorization_test
+                test_status="$(status --user "$member_auth" --header 'Content-Type: application/json' --request PUT \
+                  --data '{"type":"bootstrap-test"}' "$base_url/$database/$test_document")"
+                case "$test_status" in
+                  201|202|409) ;;
+                  *) echo "member write test failed with HTTP $test_status" >&2; exit 1 ;;
+                esac
+                test_rev="$(curl --connect-timeout 5 --max-time 30 --fail --silent --show-error --user "$member_auth" "$base_url/$database/$test_document" | sed -n 's/.*"_rev":"\([^"]*\)".*/\1/p')"
+                [ -n "$test_rev" ] || { echo "member write test revision is missing" >&2; exit 1; }
+                require_status '200,202' --user "$member_auth" --request DELETE "$base_url/$database/$test_document?rev=$test_rev"
+              fi
 
               echo "LiveSync CouchDB bootstrap and authorization checks completed."
+              touch /tmp/bootstrap-ready
+              for attempt in $(seq 1 30); do
+                sleep 10
+                if [ "$(credential_hash)" != "$initial_credential_hash" ]; then
+                  echo "Projected credentials changed; restarting the reconciler."
+                  exit 0
+                fi
+              done
+              echo "Running scheduled bootstrap drift reconciliation."
+              done
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -170,3 +200,31 @@ spec:
             limits:
               cpu: 250m
               memory: 128Mi
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - test -f /tmp/bootstrap-ready
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+          volumeMounts:
+            - name: admin-credentials
+              mountPath: /run/credentials/admin
+              readOnly: true
+            - name: member-credentials
+              mountPath: /run/credentials/member
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: admin-credentials
+          secret:
+            secretName: couchdb-admin-credentials
+        - name: member-credentials
+          secret:
+            secretName: livesync-member-credentials
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi

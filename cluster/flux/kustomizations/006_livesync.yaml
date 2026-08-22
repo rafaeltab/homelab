@@ -23,8 +23,7 @@ spec:
       kind: StatefulSet
       name: couchdb
       namespace: livesync
-    - apiVersion: batch/v1
-      kind: Job
-      # Keep this synchronized with the versioned bootstrap Job name.
-      name: livesync-bootstrap-v1
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: livesync-bootstrap
       namespace: livesync
