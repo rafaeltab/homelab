@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: livesync
+  namespace: livesync
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: livesync.homelab1.local.rafaeltab.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: couchdb
+                port:
+                  name: http
+  tls:
+    - hosts:
+        - livesync.homelab1.local.rafaeltab.com
+      secretName: livesync-homelab1-local-rafaeltab-com-tls

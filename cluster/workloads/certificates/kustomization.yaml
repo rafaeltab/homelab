@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - issuer.yaml
   - grafana_homelab1_local_rafaeltab_com.yaml
+  - livesync_homelab1_local_rafaeltab_com.yaml
   - minio_network_rafaeltab_com.yaml
   - otlp_homelab1_local_rafaeltab_com.yaml
   - registry_network_rafaeltab_com.yaml

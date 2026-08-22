@@ -1,0 +1,172 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Bump the version when bootstrap logic or either credential is rotated so
+  # Flux creates a fresh, idempotent reconciliation Job.
+  name: livesync-bootstrap-v1
+  namespace: livesync
+spec:
+  backoffLimit: 4
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: livesync-bootstrap
+        app.kubernetes.io/part-of: livesync
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 5984
+        runAsGroup: 5984
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: docker.io/library/couchdb:3.5.2.1@sha256:b80216f643e99d31df318c740dbc556ac08b56444030ed1d5e6d7b0d4e625213
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: couchdb-admin-credentials
+                  key: username
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: couchdb-admin-credentials
+                  key: password
+            - name: MEMBER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: livesync-member-credentials
+                  key: username
+            - name: MEMBER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: livesync-member-credentials
+                  key: password
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              base_url=http://couchdb:5984
+              database=livesync
+              admin_auth="${ADMIN_USERNAME}:${ADMIN_PASSWORD}"
+              member_auth="${MEMBER_USERNAME}:${MEMBER_PASSWORD}"
+
+              status() {
+                curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$@"
+              }
+              require_status() {
+                expected="$1"
+                shift
+                actual="$(status "$@")"
+                case ",${expected}," in
+                  *",${actual},"*) ;;
+                  *) echo "bootstrap request failed with HTTP ${actual}" >&2; exit 1 ;;
+                esac
+              }
+              json_escape() {
+                printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+              }
+
+              ready=false
+              for attempt in $(seq 1 60); do
+                if curl --fail --silent --show-error --user "$admin_auth" "$base_url/_up" >/dev/null; then
+                  ready=true
+                  break
+                fi
+                sleep 5
+              done
+              [ "$ready" = true ] || { echo "CouchDB did not become ready" >&2; exit 1; }
+
+              echo "Verifying single-node CouchDB state."
+              cluster_state="$(curl --fail --silent --show-error --user "$admin_auth" "$base_url/_cluster_setup")"
+              echo "$cluster_state" | grep -Eq '"state":"(single_node_enabled|cluster_finished)"' || {
+                echo "CouchDB single-node setup is incomplete" >&2
+                exit 1
+              }
+
+              echo "Ensuring the LiveSync database exists."
+              require_status '201,202,412' --user "$admin_auth" --request PUT "$base_url/$database"
+
+              echo "Verifying the LiveSync database version."
+              version_doc="$(curl --silent --show-error --user "$admin_auth" --write-out '\n%{http_code}' "$base_url/$database/obsydian_livesync_version")"
+              version_status="$(printf '%s\n' "$version_doc" | tail -n 1)"
+              version_body="$(printf '%s\n' "$version_doc" | sed '$d')"
+              if [ "$version_status" = 404 ]; then
+                require_status '201,202' --user "$admin_auth" --header 'Content-Type: application/json' --request PUT \
+                  --data '{"type":"versioninfo","version":12}' \
+                  "$base_url/$database/obsydian_livesync_version"
+              elif [ "$version_status" = 200 ]; then
+                echo "$version_body" | grep -q '"type":"versioninfo"' || { echo "incompatible LiveSync version document type" >&2; exit 1; }
+                echo "$version_body" | grep -q '"version":12' || { echo "incompatible LiveSync database version" >&2; exit 1; }
+              else
+                echo "version document lookup failed with HTTP $version_status" >&2
+                exit 1
+              fi
+
+              echo "Reconciling the routine database member."
+              user_path="$base_url/_users/org.couchdb.user:${MEMBER_USERNAME}"
+              member_username_json="$(json_escape "$MEMBER_USERNAME")"
+              member_password_json="$(json_escape "$MEMBER_PASSWORD")"
+              user_status="$(status --user "$admin_auth" "$user_path")"
+              user_rev=''
+              if [ "$user_status" = 200 ]; then
+                user_rev="$(curl --fail --silent --show-error --user "$admin_auth" "$user_path" | sed -n 's/.*"_rev":"\([^"]*\)".*/\1/p')"
+                [ -n "$user_rev" ] || { echo "existing member revision is missing" >&2; exit 1; }
+              elif [ "$user_status" != 404 ]; then
+                echo "member lookup failed with HTTP $user_status" >&2
+                exit 1
+              fi
+
+              if [ -n "$user_rev" ]; then
+                member_document="$(printf '{"_rev":"%s","name":"%s","password":"%s","roles":[],"type":"user"}' "$user_rev" "$member_username_json" "$member_password_json")"
+              else
+                member_document="$(printf '{"name":"%s","password":"%s","roles":[],"type":"user"}' "$member_username_json" "$member_password_json")"
+              fi
+              require_status '201,202' --user "$admin_auth" --header 'Content-Type: application/json' --request PUT \
+                --data "$member_document" "$user_path"
+
+              echo "Applying member-only database security."
+              security_document="$(printf '{"admins":{"names":[],"roles":[]},"members":{"names":["%s"],"roles":[]}}' "$member_username_json")"
+              require_status '200,201,202' --user "$admin_auth" --header 'Content-Type: application/json' --request PUT \
+                --data "$security_document" "$base_url/$database/_security"
+
+              echo "Running positive and negative authorization checks."
+              echo "Checking member database access."
+              require_status '200' --user "$member_auth" "$base_url/$database"
+              echo "Checking anonymous access denial."
+              require_status '401,403' "$base_url/$database"
+              echo "Checking routine credential isolation from the authentication database."
+              require_status '401,403' --user "$member_auth" "$base_url/_users"
+
+              echo "Checking member document write and delete access."
+              test_document=livesync_bootstrap_authorization_test
+              test_status="$(status --user "$member_auth" --header 'Content-Type: application/json' --request PUT \
+                --data '{"type":"bootstrap-test"}' "$base_url/$database/$test_document")"
+              case "$test_status" in
+                201|202|409) ;;
+                *) echo "member write test failed with HTTP $test_status" >&2; exit 1 ;;
+              esac
+              test_rev="$(curl --fail --silent --show-error --user "$member_auth" "$base_url/$database/$test_document" | sed -n 's/.*"_rev":"\([^"]*\)".*/\1/p')"
+              [ -n "$test_rev" ] || { echo "member write test revision is missing" >&2; exit 1; }
+              require_status '200,202' --user "$member_auth" --request DELETE "$base_url/$database/$test_document?rev=$test_rev"
+
+              echo "LiveSync CouchDB bootstrap and authorization checks completed."
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi

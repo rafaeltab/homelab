@@ -1,0 +1,179 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: couchdb-config
+  namespace: livesync
+data:
+  10-livesync.ini: |
+    [couchdb]
+    single_node = true
+    max_document_size = 50000000
+
+    [chttpd]
+    bind_address = 0.0.0.0
+    require_valid_user = true
+    enable_cors = true
+    max_http_request_size = 4294967296
+
+    [chttpd_auth]
+    require_valid_user = true
+
+    [httpd]
+    WWW-Authenticate = Basic realm="couchdb"
+    enable_cors = true
+
+    [cors]
+    credentials = true
+    origins = app://obsidian.md,capacitor://localhost,http://localhost
+    methods = GET,PUT,POST,HEAD,DELETE
+    headers = accept,authorization,content-type,origin,referer
+    max_age = 3600
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: couchdb-data
+  namespace: livesync
+  annotations:
+    # The only database claim must survive a Flux rollback or manifest removal.
+    kustomize.toolkit.fluxcd.io/prune: disabled
+  labels:
+    app.kubernetes.io/name: couchdb
+    app.kubernetes.io/part-of: livesync
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: zfs-local-persistent
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: couchdb
+  namespace: livesync
+spec:
+  serviceName: couchdb
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: OnDelete
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: couchdb
+      app.kubernetes.io/part-of: livesync
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: couchdb
+        app.kubernetes.io/part-of: livesync
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 5984
+        runAsGroup: 5984
+        fsGroup: 5984
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: couchdb
+          image: docker.io/library/couchdb:3.5.2.1@sha256:b80216f643e99d31df318c740dbc556ac08b56444030ed1d5e6d7b0d4e625213
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: COUCHDB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: couchdb-admin-credentials
+                  key: username
+            - name: COUCHDB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: couchdb-admin-credentials
+                  key: password
+          ports:
+            - name: http
+              containerPort: 5984
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - 'curl --fail --silent --show-error --user "$COUCHDB_USER:$COUCHDB_PASSWORD" http://127.0.0.1:5984/_up >/dev/null'
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - 'curl --fail --silent --show-error --user "$COUCHDB_USER:$COUCHDB_PASSWORD" http://127.0.0.1:5984/_up >/dev/null'
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - 'curl --fail --silent --show-error --user "$COUCHDB_USER:$COUCHDB_PASSWORD" http://127.0.0.1:5984/_up >/dev/null'
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/couchdb/data
+            - name: runtime-config
+              mountPath: /opt/couchdb/etc/local.d
+            - name: config
+              mountPath: /opt/couchdb/etc/local.d/10-livesync.ini
+              subPath: 10-livesync.ini
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: couchdb-data
+        - name: runtime-config
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: config
+          configMap:
+            name: couchdb-config
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: couchdb
+  namespace: livesync
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: couchdb
+    app.kubernetes.io/part-of: livesync
+  ports:
+    - name: http
+      port: 5984
+      targetPort: http
+      protocol: TCP

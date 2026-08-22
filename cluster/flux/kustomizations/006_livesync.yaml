@@ -1,0 +1,30 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: livesync
+  namespace: flux-system
+spec:
+  interval: 15m
+  path: ./cluster/workloads/livesync
+  prune: true
+  wait: true
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  dependsOn:
+    - name: namespaces
+    - name: secrets
+    - name: openebs
+    - name: certificates
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: couchdb
+      namespace: livesync
+    - apiVersion: batch/v1
+      kind: Job
+      # Keep this synchronized with the versioned bootstrap Job name.
+      name: livesync-bootstrap-v1
+      namespace: livesync
