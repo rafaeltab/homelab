@@ -144,6 +144,18 @@ spec:
         - secretRef:
             name: loki-minio-user
 
+    # The chart defaults reserve roughly 11 GiB for memcached on this 16 GiB
+    # single-node cluster. Grafana/Mimir showed 30-day peak working sets below
+    # 31 MiB for each cache, while live memcached stats showed zero evictions.
+    # Keep generous burst headroom without crowding ordinary workloads out of
+    # the Kubernetes scheduler.
+    chunksCache:
+      allocatedMemory: 512
+      allocatedCPU: 100m
+    resultsCache:
+      allocatedMemory: 256
+      allocatedCPU: 100m
+
     # Disable unused optional bloom components
     bloomPlanner:
       replicas: 0
