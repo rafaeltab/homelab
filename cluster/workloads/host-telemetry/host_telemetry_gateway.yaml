@@ -26,6 +26,8 @@ data:
         check_interval: 5s
         limit_percentage: 75
         spike_limit_percentage: 20
+      deltatocumulative:
+        max_streams: 10000
       batch:
         send_batch_size: 2048
         timeout: 5s
@@ -61,7 +63,7 @@ data:
       pipelines:
         metrics:
           receivers: [otlp]
-          processors: [memory_limiter, batch]
+          processors: [memory_limiter, deltatocumulative, batch]
           exporters: [prometheusremotewrite/mimir]
         logs:
           receivers: [otlp]
@@ -101,6 +103,8 @@ spec:
       app: host-telemetry-gateway
   template:
     metadata:
+      annotations:
+        telemetry.rafaeltab.com/config-revision: "codex-delta-v1"
       labels:
         app: host-telemetry-gateway
     spec:
