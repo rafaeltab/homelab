@@ -109,10 +109,14 @@ spec:
         traefik.ingress.kubernetes.io/router.tls: "true"
       hosts:
         - grafana.homelab1.local.rafaeltab.com
+        - grafana.homelab1.tailnet.rafaeltab.com
       tls:
         - hosts:
             - "grafana.homelab1.local.rafaeltab.com"
           secretName: grafana-homelab1-local-rafaeltab-com-tls
+        - hosts:
+            - "grafana.homelab1.tailnet.rafaeltab.com"
+          secretName: grafana-homelab1-tailnet-rafaeltab-com-tls
 
     dashboardsConfigMaps:
       kubernetes: grafana-dashboards-kubernetes
