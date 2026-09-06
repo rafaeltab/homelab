@@ -1612,7 +1612,7 @@
             "uid": "mimir"
           },
           "editorMode": "code",
-          "expr": "clamp_min(max by (hermes_codex_limit_name,hermes_codex_limit_window,hermes_account_plan) (hermes_codex_limit_reset_seconds{service_name=\"hermes-agent\",hermes_codex_limit_window!~\".* \u2014 .*\"}) - time(), 0)",
+          "expr": "clamp_min(max by (hermes_codex_limit_name,hermes_codex_limit_window) (hermes_codex_limit_reset_seconds{service_name=\"hermes-agent\",hermes_codex_limit_window!~\".* \u2014 .*\"}) - time(), 0)",
           "instant": true,
           "legendFormat": "{{hermes_codex_limit_name}} / {{hermes_codex_limit_window}} \u2014 resets in",
           "range": false,
@@ -1691,7 +1691,7 @@
             "uid": "mimir"
           },
           "editorMode": "code",
-          "expr": "max by (hermes_codex_limit_name,hermes_codex_limit_window,hermes_account_plan) (hermes_codex_limit_remaining_ratio{service_name=\"hermes-agent\",hermes_codex_limit_reset_at=\"\",hermes_codex_limit_window!~\".* \u2014 .*\"})",
+          "expr": "max by (hermes_codex_limit_name,hermes_codex_limit_window) (hermes_codex_limit_remaining_ratio{service_name=\"hermes-agent\",hermes_codex_limit_reset_at=\"\",hermes_codex_limit_window!~\".* \u2014 .*\"})",
           "instant": true,
           "legendFormat": "{{hermes_codex_limit_name}} / {{hermes_codex_limit_window}}",
           "range": false,
@@ -1795,7 +1795,7 @@
             "uid": "mimir"
           },
           "editorMode": "code",
-          "expr": "max by (hermes_codex_limit_name,hermes_codex_limit_window,hermes_account_plan) (hermes_codex_limit_remaining_ratio{service_name=\"hermes-agent\",hermes_codex_limit_reset_at=\"\",hermes_codex_limit_window!~\".* \u2014 .*\"})",
+          "expr": "max by (hermes_codex_limit_name,hermes_codex_limit_window) (hermes_codex_limit_remaining_ratio{service_name=\"hermes-agent\",hermes_codex_limit_reset_at=\"\",hermes_codex_limit_window!~\".* \u2014 .*\"})",
           "legendFormat": "{{hermes_codex_limit_name}} / {{hermes_codex_limit_window}}",
           "range": true,
           "refId": "A"
