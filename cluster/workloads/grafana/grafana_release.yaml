@@ -53,11 +53,14 @@ spec:
     service:
       type: ClusterIP
 
-    # Pin Traces Drilldown explicitly so Grafana upgrades also replace stale
-    # plugin files persisted on the Grafana PVC. Versions before 1.4.0 bundle
-    # React 18 internals and fail under Grafana 13's React 19 runtime.
+    # Pin drilldown apps explicitly so Grafana upgrades also replace stale
+    # plugin files persisted on the Grafana PVC. Their 2.x releases target
+    # Grafana 13's React 19 runtime; the persisted 1.x copies target React 18.
     plugins:
       - grafana-exploretraces-app@2.2.1
+      - grafana-lokiexplore-app@2.6.0
+      - grafana-metricsdrilldown-app@2.5.1
+      - grafana-pyroscope-app@2.3.1
 
     datasources:
       datasources.yaml:
