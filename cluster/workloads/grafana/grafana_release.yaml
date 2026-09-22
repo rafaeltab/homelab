@@ -53,6 +53,12 @@ spec:
     service:
       type: ClusterIP
 
+    # Pin Traces Drilldown explicitly so Grafana upgrades also replace stale
+    # plugin files persisted on the Grafana PVC. Versions before 1.4.0 bundle
+    # React 18 internals and fail under Grafana 13's React 19 runtime.
+    plugins:
+      - grafana-exploretraces-app@2.2.1
+
     datasources:
       datasources.yaml:
         apiVersion: 1
