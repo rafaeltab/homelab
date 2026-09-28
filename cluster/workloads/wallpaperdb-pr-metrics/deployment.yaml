@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wallpaperdb-pr-metrics
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: wallpaperdb-pr-metrics
+  template:
+    metadata:
+      labels:
+        app: wallpaperdb-pr-metrics
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: exporter
+          image: python:3.12.11-alpine3.22
+          command: [python, -u, /app/exporter.py]
+          ports:
+            - name: metrics
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 30
+          livenessProbe:
+            tcpSocket:
+              port: metrics
+            periodSeconds: 30
+          volumeMounts:
+            - name: code
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: code
+          configMap:
+            name: wallpaperdb-pr-metrics-code
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wallpaperdb-pr-metrics
+  annotations:
+    k8s.grafana.com/scrape: "true"
+    k8s.grafana.com/metrics.portName: metrics
+    k8s.grafana.com/metrics.path: /metrics
+spec:
+  selector:
+    app: wallpaperdb-pr-metrics
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics

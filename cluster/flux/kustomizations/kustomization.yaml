@@ -19,3 +19,4 @@ resources:
   - 006_tempo.yaml
   - 007_k8s_monitoring.yaml
   - 008_host_telemetry.yaml
+  - 009_wallpaperdb_pr_metrics.yaml

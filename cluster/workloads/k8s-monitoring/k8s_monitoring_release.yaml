@@ -52,6 +52,15 @@ spec:
       kube-state-metrics:
         enabled: true
 
+    annotationAutodiscovery:
+      enabled: true
+      destinations:
+        - mimir
+      collector: alloy-metrics
+      services:
+        labelSelectors:
+          app: wallpaperdb-pr-metrics
+
     selfReporting:
       enabled: false
 
