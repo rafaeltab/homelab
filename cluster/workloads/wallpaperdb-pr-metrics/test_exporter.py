@@ -37,13 +37,19 @@ class ExporterTest(unittest.TestCase):
         self.assertEqual(len(urls), 2)
 
     def test_metrics_include_zero_days_through_today(self):
-        with patch.object(exporter, "counts", {"2026-09-27": 2, "2026-09-29": 1}):
+        with patch.object(exporter, "counts", {"2026-09-27": 2, "2026-09-29": 1}), patch.object(exporter, "last_success", 1):
             output = exporter.metrics(today=date(2026, 9, 30)).decode()
         self.assertIn('wallpaperdb_pr_merges_daily{day="2026-09-27"} 2\n', output)
         self.assertIn('wallpaperdb_pr_merges_daily{day="2026-09-28"} 0\n', output)
         self.assertIn('wallpaperdb_pr_merges_daily{day="2026-09-29"} 1\n', output)
         self.assertIn('wallpaperdb_pr_merges_daily{day="2026-09-30"} 0\n', output)
-        self.assertNotIn('day="2026-09-26"', output)
+        self.assertIn('wallpaperdb_pr_merges_daily{day="2025-11-07"} 0\n', output)
+        self.assertNotIn('day="2025-11-06"', output)
+
+    def test_no_daily_values_before_first_success(self):
+        with patch.object(exporter, "counts", {}), patch.object(exporter, "last_success", 0):
+            output = exporter.metrics(today=date(2026, 9, 30)).decode()
+        self.assertNotIn('wallpaperdb_pr_merges_daily{', output)
 
     def test_error_does_not_publish_partial_page(self):
         def open_url(request, timeout):

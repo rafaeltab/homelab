@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 REPO = "rafaeltab/wallpaperdb"
+REPO_CREATED_UTC = date(2025, 11, 7)  # GitHub repository created_at.
 URL = f"https://api.github.com/repos/{REPO}/pulls?state=closed&per_page=100"
 REFRESH_SECONDS = 1800
 counts = Counter()
@@ -68,8 +69,8 @@ def metrics(today=None):
         "# HELP wallpaperdb_pr_merges_daily Number of PRs merged on this UTC date.",
         "# TYPE wallpaperdb_pr_merges_daily gauge",
     ]
-    if snapshot:
-        day = date.fromisoformat(min(snapshot))
+    if success:
+        day = REPO_CREATED_UTC
         while day <= today:
             lines.append(f'wallpaperdb_pr_merges_daily{{day="{day.isoformat()}"}} {snapshot.get(day.isoformat(), 0)}')
             day += timedelta(days=1)
