@@ -5,6 +5,7 @@ import os
 import threading
 import time
 from collections import Counter
+from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -58,14 +59,20 @@ def refresh():
         logging.exception("GitHub refresh failed; keeping previous snapshot")
 
 
-def metrics():
+def metrics(today=None):
+    if today is None:
+        today = datetime.now(timezone.utc).date()
     with lock:
         snapshot, success, error = counts.copy(), last_success, last_error
     lines = [
         "# HELP wallpaperdb_pr_merges_daily Number of PRs merged on this UTC date.",
         "# TYPE wallpaperdb_pr_merges_daily gauge",
     ]
-    lines.extend(f'wallpaperdb_pr_merges_daily{{day="{day}"}} {snapshot[day]}' for day in sorted(snapshot))
+    if snapshot:
+        day = date.fromisoformat(min(snapshot))
+        while day <= today:
+            lines.append(f'wallpaperdb_pr_merges_daily{{day="{day.isoformat()}"}} {snapshot.get(day.isoformat(), 0)}')
+            day += timedelta(days=1)
     lines += [
         "# HELP wallpaperdb_pr_metrics_last_success_seconds Unix time of last successful GitHub refresh.",
         "# TYPE wallpaperdb_pr_metrics_last_success_seconds gauge",
