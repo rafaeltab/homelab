@@ -130,3 +130,15 @@ configuration backups: they contain the existing ingest credentials.
 References: [netconsole](https://docs.kernel.org/networking/netconsole.html),
 [lockup detectors](https://docs.kernel.org/admin-guide/lockup-watchdogs.html),
 [Ubuntu crash dumps](https://ubuntu.com/server/docs/how-to/software/kernel-crash-dump/).
+
+### Activation verified
+
+The user-approved reboot completed on 2026-10-21 at about 21:21 UTC. The old
+collector delayed shutdown for roughly seven minutes; netconsole captured four
+shutdown stages waiting on its PID. No physical reset was needed. After boot,
+`kexec_crash_size` was 536870912, `kexec_crash_loaded` was 1, and `kdump-config show`
+reported `ready to kdump`. The new boot's journal was archived automatically,
+and a post-reboot netconsole delivery test arrived on zerotwo. At 21:24 UTC,
+Grafana returned HTTP 200, fresh metrics from both hosts were verified, all six
+external checks passed, and a complete incident snapshot including kernel stacks
+succeeded. Readiness was verified without deliberately crashing the kernel.
