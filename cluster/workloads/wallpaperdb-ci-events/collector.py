@@ -347,18 +347,19 @@ class Collector:
                 **{k: int(self.get(k)) for k in ("expired", "outside_backfill", "out_of_order", "future_completion", "missing_completion", "last_api_status", "unavailable_attempts", "api_failures")}}
 
     def cycle(self):
-        error = ""
-        try:
-            self.discover()
-            self.discover_reruns()
-            # Share a hard 30/hour budget with discovery; retain task page on every failure.
-            for _ in range(4):
-                if not self.fetch_task():
-                    break
-        except Deferred:
-            error = "github_budget_deferred"
-        except Exception as exc:
-            error = type(exc).__name__  # No API payloads, URLs containing credentials or exception text.
+        errors = []
+        # A failed scan must not prevent another scan or known healthy job
+        # endpoint from making progress. Each operation still consults the same
+        # persisted rate budget/backoff before any GitHub request.
+        for operation in (self.discover, self.discover_reruns, self.fetch_task,
+                          self.fetch_task, self.fetch_task, self.fetch_task):
+            try:
+                operation()
+            except Deferred:
+                errors.append("github_budget_deferred")
+            except Exception as exc:
+                errors.append(type(exc).__name__)  # Never exception text or API content.
+        error = ",".join(dict.fromkeys(errors))
         try:
             # GitHub failure must never prevent healthy Loki outbox delivery.
             self.flush()

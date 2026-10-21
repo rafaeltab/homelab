@@ -278,6 +278,7 @@ class Fixtures(unittest.TestCase):
         self.enqueue()
         self.seal()
         self.responses = [OSError("GitHub offline")]
+        self.reply({"workflow_runs": []})
         data = self.collector.cycle()
         self.assertEqual(data["sent_events"], 1)
         self.assertEqual(data["error"], "OSError")
@@ -408,6 +409,8 @@ class Fixtures(unittest.TestCase):
 
     def test_completion_slot_wrap_and_old_generation_admission(self):
         self.collector.transport = self.loki_reorder_transport
+        with self.collector.db:
+            self.collector.set("bootstrap", NOW-3*c.DAY)
         self.enqueue()
         self.collector.flush()
         self.now += 7*c.DAY
@@ -416,6 +419,8 @@ class Fixtures(unittest.TestCase):
         self.collector.flush()
         self.assertEqual(self.collector.health()["sent_events"], 2)
         self.enqueue(dict(JOB, id=22))
+        streams = [json.loads(body)["streams"][0]["stream"] for _, body in self.requests if body]
+        self.assertEqual(streams[0], streams[1])
         self.collector.flush()
         self.assertEqual(self.collector.health()["expired"], 1)
         self.assertEqual(len(self.requests), 2)
@@ -444,6 +449,39 @@ class Fixtures(unittest.TestCase):
         self.collector.flush()
         self.assertEqual(self.collector.health()["outside_backfill"], 1)
         self.assertEqual(self.requests, [])
+
+    def test_scan_failures_do_not_starve_queued_jobs_in_full_cycle(self):
+        for failed in ("recent", "daily"):
+            with self.subTest(failed=failed):
+                self.requests.clear()
+                with self.collector.db:
+                    self.collector.db.execute("DELETE FROM tasks")
+                    self.collector.db.execute("DELETE FROM calls")
+                    self.collector.db.execute("DELETE FROM outbox")
+                    self.collector.db.execute("DELETE FROM meta WHERE key LIKE 'done:%'")
+                    self.collector.set("scan_due", 0)
+                    self.collector.set("rerun_due", 0)
+                self.reply({"workflow_runs": [RUN]})
+                self.collector.discover()
+                with self.collector.db:
+                    self.collector.set("scan_due", 0)
+                jobs_requested = []
+                def fail_one_scan(url, body=None):
+                    if body is not None:
+                        return self.transport(url, body)
+                    if "/jobs?" in url:
+                        jobs_requested.append(url)
+                        return 200, {}, json.dumps({"jobs": [JOB]}).encode()
+                    recent = "created=" in url
+                    if recent == (failed == "recent"):
+                        return 500, {}, b""
+                    return 200, {}, b'{"workflow_runs": []}'
+                self.collector.transport = fail_one_scan
+                self.collector.cycle()
+                self.assertEqual(len(jobs_requested), 1)
+                self.assertEqual(self.collector.health()["pending_attempts"], 0)
+                self.assertEqual(self.collector.health()["pending_events"], 0)
+                self.collector.transport = self.transport
 
     def test_full_cycle_only_allowed_paths(self):
         self.reply({"workflow_runs": [RUN]})
