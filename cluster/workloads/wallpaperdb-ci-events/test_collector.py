@@ -1,4 +1,8 @@
 import importlib.util
+import io
+from email.message import Message
+from unittest import mock
+import urllib.response
 import json
 from pathlib import Path
 import tempfile
@@ -195,7 +199,7 @@ class Fixtures(unittest.TestCase):
         self.enqueue()
         self.seal()
         self.fail_push = True
-        with self.assertRaises(OSError):
+        with self.assertRaises(RuntimeError):
             self.collector.flush()
         original = self.requests[-1][1]
         self.collector.db.close()
@@ -395,7 +399,7 @@ class Fixtures(unittest.TestCase):
             original_transport(url, body)  # Backend received it; client lost the ack.
             raise OSError("ack lost")
         self.collector.transport = ambiguous
-        with self.assertRaises(OSError):
+        with self.assertRaises(RuntimeError):
             self.collector.flush()
         first = json.loads(self.requests[-1][1])["streams"][0]
         self.now += 3*3600
@@ -482,6 +486,121 @@ class Fixtures(unittest.TestCase):
                 self.assertEqual(self.collector.health()["pending_attempts"], 0)
                 self.assertEqual(self.collector.health()["pending_events"], 0)
                 self.collector.transport = self.transport
+
+    def test_malformed_jobs_defers_only_offending_task(self):
+        for malformed in ({"unexpected": []}, {"jobs": {}}, {"jobs": [None]},
+                          {"jobs": [JOB, dict(JOB, id=21, conclusion=[])]}):
+            with self.subTest(response=malformed):
+                with self.collector.db:
+                    self.collector.db.execute("DELETE FROM tasks")
+                    self.collector.db.execute("DELETE FROM outbox")
+                    self.collector.db.execute("DELETE FROM calls")
+                    self.collector.db.execute("DELETE FROM meta WHERE key LIKE 'done:%'")
+                    self.collector.set("scan_due", self.now+10000)
+                    self.collector.set("rerun_due", self.now+10000)
+                    for run in (RUN, dict(RUN, id=11)):
+                        self.collector.db.execute("INSERT INTO tasks(run,attempt,payload) VALUES (?,1,?)", (run["id"], json.dumps(run)))
+                bad_calls = []
+                def upstream(url, body=None):
+                    if body is not None:
+                        return 204, {}, b""
+                    if "/runs/10/" in url:
+                        bad_calls.append(url)
+                        return 200, {}, json.dumps(malformed).encode()
+                    return 200, {}, json.dumps({"jobs": [dict(JOB, id=22)]}).encode()
+                self.collector.transport = upstream
+                before = self.collector.health()["api_failures"]
+                self.collector.cycle()
+                self.collector.cycle()
+                self.assertEqual(len(bad_calls), 1)
+                self.assertEqual(self.collector.health()["api_failures"], before+1)
+                self.assertEqual(self.collector.health()["sent_events"], 1)
+                self.assertEqual(self.collector.health()["pending_attempts"], 1)
+                self.assertEqual(self.collector.db.execute("SELECT page FROM tasks").fetchone()[0], 1)
+                self.assertEqual(self.collector.db.execute("SELECT count(*) FROM outbox WHERE identity LIKE '%:10:%'").fetchone()[0], 0)
+
+    def test_rejected_stream_does_not_starve_healthy_stream(self):
+        self.enqueue(dict(JOB, id=21, conclusion="failure", completed_at=c.iso(c.stamp(JOB["completed_at"])-1)))
+        self.enqueue()
+        attempted = []
+        def selective(url, body=None):
+            assert body is not None
+            attempted.append(json.loads(body)["streams"][0]["stream"]["conclusion"])
+            return (400 if attempted[-1] == "failure" else 204), {}, b""
+        self.collector.transport = selective
+        with self.assertRaises(RuntimeError):
+            self.collector.flush()
+        self.assertEqual(attempted, ["failure", "success"])
+        self.assertEqual(self.collector.health()["sent_events"], 1)
+        self.assertEqual(self.collector.health()["pending_events"], 1)
+        self.assertEqual(self.collector.health()["delivery_failures"], 1)
+
+    def test_rejected_thousand_rows_cannot_monopolize_selection(self):
+        for i in range(1000):
+            self.enqueue(dict(JOB, id=100+i, conclusion="failure"))
+        self.enqueue(dict(JOB, id=2000, completed_at=c.iso(c.stamp(JOB["completed_at"])+1)))
+        def selective(url, body=None):
+            assert body is not None
+            labels = json.loads(body)["streams"][0]["stream"]
+            return (400 if labels["conclusion"] == "failure" else 204), {}, b""
+        self.collector.transport = selective
+        for _ in range(3):
+            with self.assertRaises(RuntimeError):
+                self.collector.flush()
+        self.assertEqual(self.collector.health()["sent_events"], 1)
+        self.assertEqual(self.collector.health()["pending_events"], 1000)
+
+    def test_frozen_retry_body_survives_new_same_stream_rows_and_restart(self):
+        self.enqueue()
+        self.fail_push = True
+        with self.assertRaises(RuntimeError):
+            self.collector.flush()
+        original = self.requests[-1][1]
+        self.enqueue(dict(JOB, id=21))
+        self.collector.db.close()
+        self.collector = c.Collector(self.path, clock=lambda: self.now, transport=self.transport)
+        self.fail_push = False
+        self.collector.flush()
+        self.assertEqual(self.requests[-2][1], original)  # oldest attempt retains its fair turn
+        self.assertEqual(self.collector.health()["sent_events"], 2)
+
+    def test_partly_expired_frozen_batch_never_sent_or_mutated(self):
+        self.enqueue()
+        self.enqueue(dict(JOB, id=21, completed_at=c.iso(c.stamp(JOB["completed_at"])+10)))
+        self.fail_push = True
+        with self.assertRaises(RuntimeError):
+            self.collector.flush()
+        original = self.requests[-1][1]
+        self.now = c.stamp(JOB["completed_at"])+167*3600+1
+        self.fail_push = False
+        self.collector.flush()
+        self.assertEqual(self.requests[-1][1], original)
+        self.assertEqual(len(self.requests), 1)
+        self.now += 10
+        self.collector.flush()
+        self.assertEqual(self.collector.health()["expired"], 2)
+        self.assertEqual(self.collector.db.execute("SELECT count(*) FROM batches").fetchone()[0], 0)
+
+    def test_real_urllib_redirect_processing_never_follows_hop(self):
+        hits = []
+        def redirect(handler, req):
+            hits.append(req.full_url)
+            headers = Message()
+            headers["Location"] = "https://api.github.com/redirect-target"
+            reply = urllib.response.addinfourl(io.BytesIO(b""), headers, req.full_url, 302)
+            setattr(reply, "msg", "Found")
+            return reply
+        self.collector.transport = self.collector.http
+        with mock.patch.object(c.urllib.request.HTTPSHandler, "https_open", redirect):
+            for _ in range(30):
+                with self.assertRaises(c.APIError) as error:
+                    self.collector.github("/actions/runs")
+                self.assertEqual(error.exception.status, 302)
+            with self.assertRaises(c.Deferred):
+                self.collector.github("/actions/runs")
+        self.assertEqual(len(hits), 30)
+        self.assertFalse(any("redirect-target" in u for u in hits))
+        self.assertEqual(self.collector.health()["github_requests_last_hour"], 30)
 
     def test_full_cycle_only_allowed_paths(self):
         self.reply({"workflow_runs": [RUN]})

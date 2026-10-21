@@ -74,6 +74,13 @@ class APIError(Exception):
         super().__init__(f"GitHub HTTP {status}")
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Every GitHub network request must have its own persisted debit.
+        # Reject rather than silently following even same-origin redirects.
+        return None
+
+
 class Collector:
     def __init__(self, path, clock=time.time, transport=None, loki=None):
         self.clock = clock
@@ -92,6 +99,12 @@ class Collector:
             PRIMARY KEY(run,attempt));
           CREATE TABLE IF NOT EXISTS outbox (identity TEXT PRIMARY KEY, ts INTEGER NOT NULL,
             labels TEXT NOT NULL, body TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending');
+          CREATE INDEX IF NOT EXISTS outbox_pending ON outbox(state,ts,identity);
+          CREATE TABLE IF NOT EXISTS batches (id INTEGER PRIMARY KEY, payload BLOB NOT NULL,
+            first_ts INTEGER NOT NULL, last_ts INTEGER NOT NULL, turn INTEGER NOT NULL DEFAULT 0);
+          CREATE INDEX IF NOT EXISTS batch_turn ON batches(turn,id);
+          CREATE TABLE IF NOT EXISTS batch_items (identity TEXT PRIMARY KEY, batch INTEGER NOT NULL);
+          CREATE INDEX IF NOT EXISTS batch_members ON batch_items(batch);
         ''')
         if not self.get("bootstrap", ""):
             with self.db:
@@ -108,7 +121,7 @@ class Collector:
             headers = {"Content-Type": "application/json", "User-Agent": "wallpaperdb-ci-events/1"}
         # No Authorization, environment-token, gh CLI, redirect to authenticated API, or credential fallback.
         req = urllib.request.Request(url, data=body, headers=headers)
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.build_opener(NoRedirect()).open(req, timeout=30) as response:
             return response.status, dict(response.headers), response.read()
 
     def get(self, key, default="0"):
@@ -234,6 +247,33 @@ class Collector:
                     self.db.execute("UPDATE tasks SET payload=? WHERE run=? AND attempt=?",
                                     (json.dumps(run, sort_keys=True), task["run"], task["attempt"]))
             result = self.github(f"/actions/runs/{task['run']}/attempts/{task['attempt']}/jobs?per_page=100&page={task['page']}")
+            jobs = result["jobs"]
+            if not isinstance(jobs, list) or len(jobs) > 100 or any(not isinstance(j, dict) or not isinstance(j.get("id"), int) or j.get("status") not in {"queued", "in_progress", "completed", "waiting", "pending", "requested"} for j in jobs):
+                raise ValueError("invalid jobs response")
+            with self.db:
+                for job in jobs:
+                    data = event(run, task["attempt"], job)
+                    if data:
+                        self.enqueue(data)
+                    elif job.get("status") == "completed":
+                        identity = f"invalid:{run['id']}:{task['attempt']}:{job['id']}"
+                        if not self.get(identity, ""):
+                            self.count("missing_completion")
+                            self.set(identity, 1)
+                incomplete = any(j.get("status") != "completed" for j in jobs)
+                if incomplete:
+                    self.set(f"incomplete:{task['run']}:{task['attempt']}", 1)
+                if len(jobs) == 100:
+                    self.db.execute("UPDATE tasks SET page=page+1 WHERE run=? AND attempt=?", (task["run"], task["attempt"]))
+                else:
+                    self.db.execute("UPDATE tasks SET initial_pending=0 WHERE run=? AND attempt=?", (task["run"], task["attempt"]))
+                    incomplete = incomplete or self.get(f"incomplete:{task['run']}:{task['attempt']}") == "1"
+                    if incomplete or run.get("status") != "completed":
+                        self.db.execute("UPDATE tasks SET page=1,ready=? WHERE run=? AND attempt=?", (self.clock()+600, task["run"], task["attempt"]))
+                        self.set(f"incomplete:{task['run']}:{task['attempt']}", 0)
+                    else:
+                        self.set(f"done:{task['run']}:{task['attempt']}", 1)
+                        self.db.execute("DELETE FROM tasks WHERE run=? AND attempt=?", (task["run"], task["attempt"]))
         except Deferred:
             raise
         except Exception as exc:
@@ -247,31 +287,6 @@ class Collector:
                     self.db.execute("UPDATE tasks SET ready=? WHERE run=? AND attempt=?",
                                     (self.clock()+600, task["run"], task["attempt"]))
             return True  # A single failure must not starve other eligible tasks.
-        jobs = result["jobs"]
-        with self.db:
-            for job in jobs:
-                data = event(run, task["attempt"], job)
-                if data:
-                    self.enqueue(data)
-                elif job.get("status") == "completed":
-                    identity = f"invalid:{run['id']}:{task['attempt']}:{job['id']}"
-                    if not self.get(identity, ""):
-                        self.count("missing_completion")
-                        self.set(identity, 1)
-            incomplete = any(j.get("status") != "completed" for j in jobs)
-            if incomplete:
-                self.set(f"incomplete:{task['run']}:{task['attempt']}", 1)
-            if len(jobs) == 100:
-                self.db.execute("UPDATE tasks SET page=page+1 WHERE run=? AND attempt=?", (task["run"], task["attempt"]))
-            else:
-                self.db.execute("UPDATE tasks SET initial_pending=0 WHERE run=? AND attempt=?", (task["run"], task["attempt"]))
-                incomplete = incomplete or self.get(f"incomplete:{task['run']}:{task['attempt']}") == "1"
-                if incomplete or run.get("status") != "completed":
-                    self.db.execute("UPDATE tasks SET page=1,ready=? WHERE run=? AND attempt=?", (self.clock()+600, task["run"], task["attempt"]))
-                    self.set(f"incomplete:{task['run']}:{task['attempt']}", 0)
-                else:
-                    self.set(f"done:{task['run']}:{task['attempt']}", 1)
-                    self.db.execute("DELETE FROM tasks WHERE run=? AND attempt=?", (task["run"], task["attempt"]))
         return True
 
     def enqueue(self, data):
@@ -306,31 +321,63 @@ class Collector:
         # apart; the 167h admission guard prevents overlap. Late tasks and
         # failed initial fetches cannot advance another slot's highwater.
         # There is deliberately no global initial-history delivery barrier.
-        rows = self.db.execute("SELECT * FROM outbox WHERE state='pending' ORDER BY ts,identity LIMIT 1000").fetchall()
+        rows = self.db.execute("SELECT * FROM outbox WHERE state='pending' AND NOT EXISTS "
+                               "(SELECT 1 FROM batch_items WHERE identity=outbox.identity) "
+                               "ORDER BY ts,identity LIMIT 1000").fetchall()
         grouped = collections.defaultdict(list)
-        for row in rows:
-            labels = json.loads(row["labels"])
-            reason = "expired" if row["ts"] < now - 167 * 3600 else ""
-            if row["ts"] > now:
-                reason = "future_completion"
-            if reason:
-                with self.db:
+        with self.db:
+            for row in rows:
+                reason = "expired" if row["ts"] < now - 167 * 3600 else ""
+                if row["ts"] > now:
+                    reason = "future_completion"
+                if reason:
                     self.db.execute("UPDATE outbox SET state=? WHERE identity=?", (reason, row["identity"]))
                     self.count(reason)
-                continue
-            grouped[row["labels"]].append(row)
-        for labels, values in grouped.items():
-            # Small deterministic chunks; crash retries use identical labels/time/body.
-            for start in range(0, len(values), 100):
-                batch = values[start:start+100]
-                payload = {"streams": [{"stream": json.loads(labels), "values": [[str(v["ts"] * 10**9), v["body"]] for v in batch]}]}
-                status, _, _ = self.transport(self.loki, json.dumps(payload).encode())
-                if status != 204:
-                    raise RuntimeError(f"Loki HTTP {status}")
-                with self.db:
-                    self.db.executemany("UPDATE outbox SET state='sent' WHERE identity=?", [(r["identity"],) for r in batch])
-                    self.set("highwater:" + labels, max(int(self.get("highwater:" + labels)), batch[-1]["ts"]))
+                else:
+                    grouped[row["labels"]].append(row)
+            for labels, values in grouped.items():
+                for start in range(0, len(values), 100):
+                    batch = values[start:start+100]
+                    payload = {"streams": [{"stream": json.loads(labels), "values": [[str(v["ts"] * 10**9), v["body"]] for v in batch]}]}
+                    key = self.db.execute("INSERT INTO batches(payload,first_ts,last_ts,turn) VALUES (?,?,?,?)",
+                                          (json.dumps(payload).encode(), batch[0]["ts"], batch[-1]["ts"], int(self.get("delivery_turn")))).lastrowid
+                    self.db.executemany("INSERT INTO batch_items VALUES (?,?)", [(r["identity"], key) for r in batch])
+        # Persist immutable request bodies BEFORE IO; newly enqueued events cannot
+        # alter ambiguous-ack retries. Least-recently-attempted selection prevents
+        # rejected rows monopolizing either the bounded read or delivery budget.
+        failures = 0
+        for batch in self.db.execute("SELECT * FROM batches ORDER BY turn,id LIMIT 10").fetchall():
+            with self.db:
+                self.count("delivery_turn")
+                self.db.execute("UPDATE batches SET turn=? WHERE id=?", (int(self.get("delivery_turn")), batch["id"]))
+            state = "sent"
+            if batch["first_ts"] < now - 167 * 3600:
+                # Do not mutate a frozen body or send partially expired batches.
+                # Wait at most one slot (<30m) until all members can expire.
+                if batch["last_ts"] >= now - 167 * 3600:
+                    continue
+                state = "expired"
+            else:
+                try:
+                    status, _, _ = self.transport(self.loki, batch["payload"])
+                    if status != 204:
+                        raise RuntimeError("Loki rejected batch")
+                except Exception:
+                    failures += 1
+                    with self.db:
+                        self.count("delivery_failures")
+                    continue
+            with self.db:
+                changed = self.db.execute("UPDATE outbox SET state=? WHERE identity IN "
+                                          "(SELECT identity FROM batch_items WHERE batch=?)", (state, batch["id"])).rowcount
+                if state == "expired":
+                    self.count("expired", changed)
+                else:
                     self.set("last_delivery", now)
+                self.db.execute("DELETE FROM batch_items WHERE batch=?", (batch["id"],))
+                self.db.execute("DELETE FROM batches WHERE id=?", (batch["id"],))
+        if failures:
+            raise RuntimeError("Loki batch delivery failures")
 
     def health(self, error=""):
         pending = self.db.execute("SELECT count(*),min(ts) FROM outbox WHERE state='pending'").fetchone()
@@ -344,7 +391,7 @@ class Collector:
                 "rerun_scan_page": int(self.get("rerun_page", "1")),
                 "github_requests_last_hour": self.db.execute("SELECT count(*) FROM calls WHERE at>?", (self.clock()-3600,)).fetchone()[0],
                 "initial_ready": self.initial_ready(), "error": error,
-                **{k: int(self.get(k)) for k in ("expired", "outside_backfill", "out_of_order", "future_completion", "missing_completion", "last_api_status", "unavailable_attempts", "api_failures")}}
+                **{k: int(self.get(k)) for k in ("expired", "outside_backfill", "out_of_order", "future_completion", "missing_completion", "last_api_status", "unavailable_attempts", "api_failures", "delivery_failures")}}
 
     def cycle(self):
         errors = []
