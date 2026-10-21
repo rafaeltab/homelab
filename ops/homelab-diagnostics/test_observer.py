@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import sys
 import time
 import unittest
 from unittest.mock import patch
@@ -61,6 +62,13 @@ class ObserverTest(unittest.TestCase):
         self.assertEqual(len(record['probes']), 6)
         self.assertTrue(record['probes']['metrics_freshness']['ok'])
         self.assertEqual(captures, 1)
+
+    def test_timed_out_snapshot_keeps_output_written_before_the_hang(self):
+        result = observer.run([sys.executable, '-c',
+            'import time; print("saved before hang", flush=True); time.sleep(10)'], timeout=0.2)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['error'], 'TimeoutExpired')
+        self.assertIn('saved before hang', result['stdout'])
 
     def test_log_rotation_retains_latest_data_without_unbounded_files(self):
         path = Path(self.temp.name) / 'archive.log'

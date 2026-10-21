@@ -27,7 +27,10 @@ Files on zerotwo:
 
 Failures trigger a bounded SSH snapshot of memory, pressure metrics, processes,
 recent logs, temperatures and ZFS status, plus Kubernetes pod summaries/events.
-Every command times out; failed attempts are recorded. Capture repeats at most
+Every command times out; failed attempts and partial output are recorded. When
+the Kubernetes API works, capture also reads collector thread stacks through the
+existing privileged host exporter. These fixed probes only read host state.
+Capture repeats at most
 once per five minutes during an unchanged failure. A completely frozen node
 cannot execute a snapshot. Full object YAML, environment variables and Secrets
 are not archived by the snapshot.

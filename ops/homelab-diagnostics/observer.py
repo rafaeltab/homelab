@@ -71,7 +71,13 @@ def run(argv: list[str], timeout: int = 8, data: str | None = None) -> dict:
         return {'ok': p.returncode == 0, 'returncode': p.returncode,
                 'duration_ms': round((time.monotonic() - started) * 1000),
                 'stdout': p.stdout[-65536:], 'stderr': p.stderr[-4000:]}
-    except (subprocess.TimeoutExpired, OSError) as exc:
+    except subprocess.TimeoutExpired as exc:
+        def partial(value):
+            return value.decode(errors='replace') if isinstance(value, bytes) else (value or '')
+        return {'ok': False, 'duration_ms': round((time.monotonic() - started) * 1000),
+                'error': 'TimeoutExpired', 'stdout': partial(exc.stdout)[-65536:],
+                'stderr': partial(exc.stderr)[-4000:]}
+    except OSError as exc:
         return {'ok': False, 'duration_ms': round((time.monotonic() - started) * 1000),
                 'error': type(exc).__name__}
 
@@ -98,13 +104,34 @@ def commands(config: dict) -> dict[str, list[str]]:
 
 def capture(config: dict, reason: dict) -> dict:
     result = {'captured_at': now(), 'reason': reason}
-    result['host'] = run(['/usr/bin/ssh', *SSH_OPTIONS, config['ssh_host'],
-                          'timeout 18s sh -s'], timeout=23, data=SNAPSHOT)
-    result['pods'] = run([config['kubectl'], '--kubeconfig=' + config['kubeconfig'],
-                          '--request-timeout=4s', 'get', 'pods', '-A', '-o', 'wide'])
-    result['events'] = run([config['kubectl'], '--kubeconfig=' + config['kubeconfig'],
-                            '--request-timeout=4s', 'get', 'events', '-A',
-                            '--sort-by=.metadata.creationTimestamp'])
+    kube = [config['kubectl'], '--kubeconfig=' + config['kubeconfig'], '--request-timeout=4s']
+    stacks = r'''date -Is
+ps -eLo pid,tid,stat,pcpu,wchan:35,comm --sort=-pcpu | head -60
+for pid in $(pgrep -x otelcol-contrib); do
+  for task in /proc/$pid/task/*; do
+    state=$(awk '{print $3}' "$task/stat" 2>/dev/null)
+    case "$state" in
+      R|D|Z) printf '\n%s state=%s\n' "$task" "$state"; timeout 2 cat "$task/stack" ;;
+    esac
+  done
+done'''
+    jobs = {
+        'host': (['/usr/bin/ssh', *SSH_OPTIONS, config['ssh_host'],
+                  'timeout 18s sh -s'], 23, SNAPSHOT),
+        'pods': (kube + ['get', 'pods', '-A', '-o', 'wide'], 8, None),
+        'events': (kube + ['get', 'events', '-A', '--sort-by=.metadata.creationTimestamp'], 8, None),
+        # The existing privileged exporter has a read-only host mount. Entering
+        # the host namespaces here only runs this fixed, read-only stack probe.
+        'kernel_stacks': (kube + ['-n', 'observability', 'exec',
+            'daemonset/host-telemetry-agent', '-c', 'zpool-metrics', '--',
+            'chroot', '/hostfs', '/usr/bin/nsenter', '-t', '1', '-m', '-u', '-i',
+            '-n', '-p', '-r', '-w', '--', '/usr/bin/timeout', '12',
+            '/bin/bash', '-c', stacks], 16, None),
+    }
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {name: pool.submit(run, argv, timeout, data)
+                   for name, (argv, timeout, data) in jobs.items()}
+        result.update({name: future.result() for name, future in futures.items()})
     # Do not archive full object YAML: pod environment/config may contain credentials.
     path = Path(config['log_dir']) / 'incidents' / ('incident-' + now().replace(':', '-') + '.json')
     atomic_json(path, result)
