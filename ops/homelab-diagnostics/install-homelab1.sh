@@ -5,14 +5,29 @@ set -euo pipefail
 [ "$(id -u)" = 0 ] || exit 1
 command -v kdump-config >/dev/null || { echo 'Install kdump-tools and makedumpfile first.' >&2; exit 1; }
 install -d -m 0755 /etc/modules-load.d /etc/modprobe.d /etc/default/grub.d /etc/sysctl.d
-cat > /etc/modules-load.d/homelab-netconsole.conf <<'CONF'
-netconsole
-CONF
+# Wait for udev interface naming and the wired network before loading netconsole.
+# An early modules-load attempt can fail before enp2s0 exists.
+if [ -f /etc/modules-load.d/homelab-netconsole.conf ]; then
+    unlink /etc/modules-load.d/homelab-netconsole.conf
+fi
 cat > /etc/modprobe.d/homelab-netconsole.conf <<'CONF'
 # Wired LAN receiver on zerotwo. Explicit destination MAC avoids broadcast.
 options netconsole netconsole=+6665@192.168.2.46/enp2s0,6666@192.168.2.98/38:05:25:39:33:56
 CONF
-modprobe netconsole
+cat > /etc/systemd/system/homelab1-netconsole.service <<'UNIT'
+[Unit]
+Description=Send homelab1 kernel diagnostics to zerotwo
+Wants=network-online.target
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/modprobe netconsole
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now homelab1-netconsole.service
 # 512 MiB is reserved for the dump kernel at the next boot. The ext4 root
 # filesystem has sufficient space for dumps and remains independent of tank.
 # Remove the superseded file from the initial installation.
