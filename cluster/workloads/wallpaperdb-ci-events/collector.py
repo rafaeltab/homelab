@@ -181,6 +181,46 @@ class Collector:
                 self.set("scan_floor", int(now) - 6 * DAY)
         return True
 
+    def discover_reruns(self):
+        """Daily unfiltered traversal finds activity on older-created runs.
+
+        A persisted fixed cutoff tolerates a multi-hour, rate-limited traversal.
+        No creation filter: GitHub's filtered-search 1000-result ceiling does
+        not apply. Pagination is not a snapshot; daily overlap repairs shifts.
+        """
+        now = self.clock()
+        if now < float(self.get("rerun_due")):
+            return False
+        page = int(self.get("rerun_page", "1"))
+        floor = int(self.get("rerun_floor", str(int(now) - 6 * DAY)))
+        result = self.github(f"/actions/runs?per_page=100&page={page}")
+        runs = result["workflow_runs"]
+        with self.db:
+            for run in runs:
+                # updated_at changes on reruns, unlike created_at. Missing
+                # update metadata is investigated rather than silently ignored.
+                try:
+                    if stamp(run.get("updated_at")) < floor:
+                        continue
+                except (ValueError, TypeError, OverflowError):
+                    pass
+                data = {k: run.get(k) for k in ("id", "name", "path", "head_branch", "event", "status", "updated_at")}
+                for attempt in range(1, int(run.get("run_attempt", 1)) + 1):
+                    if self.get(f"done:{run['id']}:{attempt}", ""):
+                        continue
+                    self.db.execute("INSERT INTO tasks(run,attempt,payload) VALUES (?,?,?) "
+                                    "ON CONFLICT(run,attempt) DO UPDATE SET payload=excluded.payload",
+                                    (run["id"], attempt, json.dumps(data, sort_keys=True)))
+            self.set("rerun_floor", floor)
+            if len(runs) == 100:
+                self.set("rerun_page", page + 1)
+            else:
+                self.set("rerun_page", 1)
+                self.set("rerun_due", now + DAY)
+                self.set("rerun_floor", int(now) - 6 * DAY)
+                self.set("last_rerun_scan", int(now))
+        return True
+
     def fetch_task(self):
         task = self.db.execute("SELECT * FROM tasks WHERE ready<=? ORDER BY ready,run,attempt LIMIT 1", (self.clock(),)).fetchone()
         if not task:
@@ -239,9 +279,13 @@ class Collector:
         ts = data["completed_seconds"]
         labels = {"service_name": SERVICE, "repository": REPO, "event_type": "job",
                   "job_category": CATEGORIES.get(data["job"], "other"), "conclusion": data["conclusion"],
-                  "phase": "initial" if ts <= int(self.get("bootstrap")) else "live"}
-        self.db.execute("INSERT OR IGNORE INTO outbox(identity,ts,labels,body) VALUES (?,?,?,?)",
-                        (identity, ts, json.dumps(labels, sort_keys=True), json.dumps(data, sort_keys=True, separators=(",", ":"))))
+                  "phase": "initial" if ts <= int(self.get("bootstrap")) else "live",
+                  "completion_slot": str((ts // 1800) % 336)}
+        state = "outside_backfill" if ts < int(self.get("floor")) else "pending"
+        inserted = self.db.execute("INSERT OR IGNORE INTO outbox(identity,ts,labels,body,state) VALUES (?,?,?,?,?)",
+                        (identity, ts, json.dumps(labels, sort_keys=True), json.dumps(data, sort_keys=True, separators=(",", ":")), state)).rowcount
+        if inserted and state == "outside_backfill":
+            self.count("outside_backfill")
 
     def initial_ready(self):
         # Barrier is first full traversal, not completion of all live/in-progress runs.
@@ -256,22 +300,23 @@ class Collector:
 
     def flush(self):
         now = int(self.clock())
-        rows = self.db.execute("SELECT * FROM outbox WHERE state='pending' ORDER BY ts,identity").fetchall()
+        # Fixed 336-value half-hour ring partitions by EVENT time, not ingestion.
+        # Within each admitted generation timestamps differ by <30m, safely
+        # inside the verified 1h Loki reorder window. Generations are 168h
+        # apart; the 167h admission guard prevents overlap. Late tasks and
+        # failed initial fetches cannot advance another slot's highwater.
+        # There is deliberately no global initial-history delivery barrier.
+        rows = self.db.execute("SELECT * FROM outbox WHERE state='pending' ORDER BY ts,identity LIMIT 1000").fetchall()
         grouped = collections.defaultdict(list)
         for row in rows:
             labels = json.loads(row["labels"])
-            # Keep a one-hour margin under the actual seven-day old-sample admission ceiling.
-            # A conservative 30-minute per-stream reorder horizon is below Loki's normal 1h.
-            last = int(self.get("highwater:" + row["labels"]))
-            reason = "expired" if row["ts"] < now - 167 * 3600 else "out_of_order" if row["ts"] < last - 1800 else ""
+            reason = "expired" if row["ts"] < now - 167 * 3600 else ""
             if row["ts"] > now:
                 reason = "future_completion"
             if reason:
                 with self.db:
                     self.db.execute("UPDATE outbox SET state=? WHERE identity=?", (reason, row["identity"]))
                     self.count(reason)
-                continue
-            if labels["phase"] == "initial" and not self.initial_ready():
                 continue
             grouped[row["labels"]].append(row)
         for labels, values in grouped.items():
@@ -295,13 +340,17 @@ class Collector:
                 "pending_attempts": tasks, "oldest_pending_seconds": pending[1], "sent_events": sent[0],
                 "oldest_event_seconds": sent[1], "newest_event_seconds": sent[2],
                 "last_discovery_seconds": int(self.get("last_discovery")), "last_delivery_seconds": int(self.get("last_delivery")),
+                "last_rerun_scan_seconds": int(self.get("last_rerun_scan")),
+                "rerun_scan_page": int(self.get("rerun_page", "1")),
+                "github_requests_last_hour": self.db.execute("SELECT count(*) FROM calls WHERE at>?", (self.clock()-3600,)).fetchone()[0],
                 "initial_ready": self.initial_ready(), "error": error,
-                **{k: int(self.get(k)) for k in ("expired", "out_of_order", "future_completion", "missing_completion", "last_api_status", "unavailable_attempts", "api_failures")}}
+                **{k: int(self.get(k)) for k in ("expired", "outside_backfill", "out_of_order", "future_completion", "missing_completion", "last_api_status", "unavailable_attempts", "api_failures")}}
 
     def cycle(self):
         error = ""
         try:
             self.discover()
+            self.discover_reruns()
             # Share a hard 30/hour budget with discovery; retain task page on every failure.
             for _ in range(4):
                 if not self.fetch_task():
@@ -317,12 +366,12 @@ class Collector:
             error = "delivery_" + type(exc).__name__
         data = self.health(error)
         body = json.dumps(data, sort_keys=True, separators=(",", ":"))
+        print(body, flush=True)  # Local diagnostics survive a failed status export.
         payload = {"streams": [{"stream": {"service_name": SERVICE, "repository": REPO, "event_type": "collector_status"},
                                 "values": [[str(int(self.clock()) * 10**9), body]]}]}
         status, _, _ = self.transport(self.loki, json.dumps(payload).encode())
         if status != 204:
             raise RuntimeError(f"Loki status HTTP {status}")
-        print(body, flush=True)
         return data
 
 

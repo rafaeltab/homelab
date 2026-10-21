@@ -98,7 +98,7 @@ class Fixtures(unittest.TestCase):
         row = self.collector.db.execute("SELECT * FROM outbox").fetchone()
         labels = json.loads(row["labels"])
         self.assertEqual(labels["job_category"], "other")
-        self.assertEqual(set(labels), {"service_name", "repository", "event_type", "job_category", "conclusion", "phase"})
+        self.assertEqual(set(labels), {"service_name", "repository", "event_type", "job_category", "conclusion", "phase", "completion_slot"})
         self.assertEqual(json.loads(row["body"])["job"], "build (node=22, os=linux)")
 
     def test_duplicate_fetch_deduplicates(self):
@@ -182,13 +182,10 @@ class Fixtures(unittest.TestCase):
         self.assertTrue(self.collector.fetch_task())
         self.assertTrue(self.collector.get("done:10:1", ""))
 
-    def test_initial_barrier_and_chronological_delivery(self):
+    def test_chronological_batch_without_global_barrier(self):
         self.enqueue()
         older = dict(JOB, id=21, completed_at="2026-10-21T09:51:46Z")
         self.enqueue(older)
-        self.collector.flush()
-        self.assertEqual(self.requests, [])
-        self.seal()
         self.collector.flush()
         values = json.loads(self.requests[0][1])["streams"][0]["values"]
         self.assertEqual([json.loads(v[1])["job_id"] for v in values], [21, 20])
@@ -218,14 +215,15 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(self.requests, [])
         self.assertEqual(self.collector.health()["expired"], 1)
 
-    def test_late_old_stream_omitted_not_backdated(self):
+    def test_late_old_completion_delivered_in_event_time_slot(self):
         self.enqueue()
         self.seal()
         self.collector.flush()
         self.enqueue(dict(JOB, id=21, started_at="2026-10-20T00:00:00Z", completed_at="2026-10-20T00:01:00Z"))
         self.collector.flush()
-        self.assertEqual(self.collector.health()["out_of_order"], 1)
-        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(self.collector.health()["out_of_order"], 0)
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual(self.collector.health()["sent_events"], 2)
 
     def test_invalid_completion_omission_count_deduplicates(self):
         for _ in range(2):
@@ -306,13 +304,155 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(self.collector.health()["api_failures"], 1)
         self.assertEqual(self.collector.health()["pending_attempts"], 1)
 
+    def loki_reorder_transport(self, url, body=None):
+        if body is None:
+            return self.transport(url, body)
+        if not hasattr(self, "watermarks"):
+            self.watermarks = {}
+        for stream in json.loads(body)["streams"]:
+            key = json.dumps(stream["stream"], sort_keys=True)
+            for ts, _ in stream["values"]:
+                second = int(ts) // 10**9
+                self.assertGreaterEqual(second, self.watermarks.get(key, second)-3600,
+                                        "Loki would reject out-of-order sample")
+                self.watermarks[key] = max(second, self.watermarks.get(key, second))
+        return self.transport(url, body)
+
+    def test_daily_scan_discovers_day_seven_rerun_of_completed_run(self):
+        self.reply({"workflow_runs": [dict(RUN, updated_at=c.iso(self.now))]})
+        self.collector.discover_reruns()
+        self.reply({"jobs": [JOB]})
+        self.collector.fetch_task()
+        self.assertEqual(self.collector.health()["pending_attempts"], 0)
+        self.now += 7*c.DAY
+        self.reply({"workflow_runs": [dict(RUN, run_attempt=2,
+                    created_at=c.iso(NOW-100*c.DAY), updated_at=c.iso(self.now))]})
+        self.collector.discover_reruns()
+        self.assertNotIn("created=", self.requests[-1][0])
+        self.assertEqual(self.collector.db.execute("SELECT attempt FROM tasks").fetchone()[0], 2)
+        self.reply({"jobs": [dict(JOB, id=21, started_at=c.iso(self.now-700), completed_at=c.iso(self.now-9))]})
+        self.collector.fetch_task()
+        self.collector.flush()
+        self.assertEqual(self.collector.health()["sent_events"], 1)
+        self.assertEqual(self.collector.health()["expired"], 1)  # prior undelivered attempt
+
+    def test_rerun_scan_pagination_failure_and_restart(self):
+        self.reply({"workflow_runs": [dict(RUN, id=i, updated_at=c.iso(self.now)) for i in range(100)]})
+        self.collector.discover_reruns()
+        self.assertEqual(self.collector.get("rerun_page"), "2")
+        self.responses.append(OSError("offline"))
+        with self.assertRaises(OSError):
+            self.collector.discover_reruns()
+        self.collector.db.close()
+        self.collector = c.Collector(self.path, clock=lambda: self.now, transport=self.transport)
+        self.reply({"workflow_runs": []})
+        self.collector.discover_reruns()
+        self.assertIn("page=2", self.requests[-1][0])
+        self.assertEqual(self.collector.get("rerun_page"), "1")
+        self.assertFalse(self.collector.discover_reruns())
+
+    def test_fifth_older_completion_not_lost_across_four_task_cycle(self):
+        self.collector.transport = self.loki_reorder_transport
+        self.reply({"workflow_runs": [dict(RUN, id=i) for i in range(1, 6)]})
+        self.reply({"workflow_runs": []})
+        for i in range(4):
+            self.reply({"jobs": [dict(JOB, id=20+i, started_at=c.iso(NOW-700), completed_at=c.iso(NOW-10))]})
+        self.collector.cycle()
+        self.assertEqual(self.collector.health()["sent_events"], 4)
+        self.reply({"jobs": [dict(JOB, id=24, started_at=c.iso(NOW-4300), completed_at=c.iso(NOW-3610))]})
+        self.collector.cycle()
+        self.assertEqual(self.collector.health()["sent_events"], 5)
+        self.assertEqual(self.collector.health()["out_of_order"], 0)
+
+    def test_prolonged_500_does_not_block_initial_history_or_recovery(self):
+        self.collector.transport = self.loki_reorder_transport
+        self.reply({"workflow_runs": [RUN, dict(RUN, id=11)]})
+        self.collector.discover()
+        self.responses.append((500, {}, b""))
+        self.collector.fetch_task()
+        self.reply({"jobs": [dict(JOB, id=21, started_at=c.iso(NOW-700), completed_at=c.iso(NOW-10))]})
+        self.collector.fetch_task()
+        self.collector.flush()
+        self.assertEqual(self.collector.health()["sent_events"], 1)
+        for _ in range(12):
+            self.now += 601
+            self.responses.append((500, {}, b""))
+            self.collector.fetch_task()
+            self.collector.flush()
+        self.assertEqual(self.collector.health()["sent_events"], 1)
+        self.now += 601
+        self.reply({"jobs": [JOB]})
+        self.collector.fetch_task()
+        self.collector.flush()
+        self.assertEqual(self.collector.health()["sent_events"], 2)
+        self.assertEqual(self.collector.health()["expired"], 0)
+
+    def test_ambiguous_ack_multi_hour_retry_preserves_identity(self):
+        self.enqueue()
+        original_transport = self.loki_reorder_transport
+        def ambiguous(url, body=None):
+            original_transport(url, body)  # Backend received it; client lost the ack.
+            raise OSError("ack lost")
+        self.collector.transport = ambiguous
+        with self.assertRaises(OSError):
+            self.collector.flush()
+        first = json.loads(self.requests[-1][1])["streams"][0]
+        self.now += 3*3600
+        self.collector.transport = original_transport
+        self.enqueue(dict(JOB, id=21, started_at=c.iso(self.now-700), completed_at=c.iso(self.now-10)))
+        self.collector.flush()
+        matching = [json.loads(body)["streams"][0] for _, body in self.requests
+                    if body and json.loads(body)["streams"][0]["stream"] == first["stream"]]
+        self.assertEqual(matching, [first, first])
+        self.assertEqual(self.collector.health()["sent_events"], 2)
+
+    def test_completion_slot_wrap_and_old_generation_admission(self):
+        self.collector.transport = self.loki_reorder_transport
+        self.enqueue()
+        self.collector.flush()
+        self.now += 7*c.DAY
+        self.enqueue(dict(JOB, id=21, started_at=c.iso(c.stamp(JOB["started_at"])+7*c.DAY),
+                          completed_at=c.iso(c.stamp(JOB["completed_at"])+7*c.DAY)))
+        self.collector.flush()
+        self.assertEqual(self.collector.health()["sent_events"], 2)
+        self.enqueue(dict(JOB, id=22))
+        self.collector.flush()
+        self.assertEqual(self.collector.health()["expired"], 1)
+        self.assertEqual(len(self.requests), 2)
+
+    def test_same_slot_reverse_arrival_is_inside_reorder_window(self):
+        self.collector.transport = self.loki_reorder_transport
+        for i, second in enumerate([1799, 0, 1000, 5]):
+            end = (NOW//1800-1)*1800+second
+            self.enqueue(dict(JOB, id=30+i, started_at=c.iso(end-100), completed_at=c.iso(end)))
+            self.collector.flush()
+        self.assertEqual(self.collector.health()["sent_events"], 4)
+        self.assertEqual(len(self.watermarks), 1)
+
+    def test_outbox_read_is_bounded_and_next_flush_progresses(self):
+        for i in range(1001):
+            self.enqueue(dict(JOB, id=100+i))
+        self.collector.flush()
+        self.assertEqual(self.collector.health()["sent_events"], 1000)
+        self.collector.flush()
+        self.assertEqual(self.collector.health()["sent_events"], 1001)
+
+    def test_daily_discovery_does_not_expand_initial_backfill(self):
+        old = dict(JOB, started_at=c.iso(NOW-6*c.DAY-100), completed_at=c.iso(NOW-6*c.DAY-1))
+        self.enqueue(old)
+        self.enqueue(old)
+        self.collector.flush()
+        self.assertEqual(self.collector.health()["outside_backfill"], 1)
+        self.assertEqual(self.requests, [])
+
     def test_full_cycle_only_allowed_paths(self):
         self.reply({"workflow_runs": [RUN]})
+        self.reply({"workflow_runs": []})
         self.reply({"jobs": [JOB]})
         health = self.collector.cycle()
         self.assertEqual(health["sent_events"], 1)
         self.assertEqual(health["pending_attempts"], 0)
-        self.assertEqual(len(self.requests), 4)  # runs, jobs, job push, status push
+        self.assertEqual(len(self.requests), 5)  # recent runs, daily scan, jobs, job push, status push
         self.assertEqual(json.loads(self.requests[-1][1])["streams"][0]["stream"]["event_type"], "collector_status")
 
 
