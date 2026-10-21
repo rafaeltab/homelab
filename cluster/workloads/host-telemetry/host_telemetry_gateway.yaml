@@ -30,6 +30,7 @@ data:
         max_streams: 10000
       batch:
         send_batch_size: 2048
+        send_batch_max_size: 2048
         timeout: 5s
 
     exporters:
@@ -48,6 +49,7 @@ data:
         sending_queue:
           enabled: true
           storage: file_storage/queue
+          num_consumers: 2
         retry_on_failure:
           enabled: true
       otlphttp/tempo:
@@ -55,6 +57,7 @@ data:
         sending_queue:
           enabled: true
           storage: file_storage/queue
+          num_consumers: 2
         retry_on_failure:
           enabled: true
 
@@ -80,6 +83,7 @@ data:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  # Retain the old ZFS queue for incident evidence and possible backlog recovery.
   name: host-telemetry-gateway-queue
   namespace: observability
 spec:
@@ -88,6 +92,20 @@ spec:
   resources:
     requests:
       storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: host-telemetry-gateway-queue-ext4
+  namespace: observability
+spec:
+  accessModes: [ReadWriteOnce]
+  # The previous collector remained stuck in ZFS writes after a container OOM.
+  # local-path lives on the node's ext4 root filesystem.
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -104,7 +122,7 @@ spec:
   template:
     metadata:
       annotations:
-        telemetry.rafaeltab.com/config-revision: "codex-delta-v1"
+        telemetry.rafaeltab.com/config-revision: "ext4-queue-v2"
       labels:
         app: host-telemetry-gateway
     spec:
@@ -117,6 +135,9 @@ spec:
         - name: otelcol
           image: otel/opentelemetry-collector-contrib:0.147.0
           args: ["--config=/etc/otelcol/config.yaml"]
+          env:
+            - name: GOMEMLIMIT
+              value: 256MiB
           ports:
             - name: otlp-http
               containerPort: 4318
@@ -151,7 +172,7 @@ spec:
             secretName: host-telemetry-ingest-auth
         - name: queue
           persistentVolumeClaim:
-            claimName: host-telemetry-gateway-queue
+            claimName: host-telemetry-gateway-queue-ext4
 ---
 apiVersion: v1
 kind: Service
