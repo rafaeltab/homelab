@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wallpaperdb-ci-events-state
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: zfs-local-persistent
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wallpaperdb-ci-events
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: wallpaperdb-ci-events
+  template:
+    metadata:
+      labels:
+        app: wallpaperdb-ci-events
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: collector
+          image: python:3.12.11-alpine3.22
+          command: [python, -u, /app/collector.py]
+          env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            exec:
+              command: [python, -c, "import sqlite3; sqlite3.connect('file:/state/collector.sqlite?mode=ro', uri=True).execute('SELECT 1 FROM meta LIMIT 1').fetchone()"]
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          volumeMounts:
+            - name: code
+              mountPath: /app
+              readOnly: true
+            - name: state
+              mountPath: /state
+      volumes:
+        - name: code
+          configMap:
+            name: wallpaperdb-ci-events-code
+        - name: state
+          persistentVolumeClaim:
+            claimName: wallpaperdb-ci-events-state
